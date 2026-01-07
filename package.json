@@ -1,0 +1,41 @@
+{
+  "name": "leadboost-saas",
+  "version": "2.0.0",
+  "description": "Production-grade Lead Intelligence SaaS Platform",
+  "main": "index.js",
+  "scripts": {
+    "dev": "concurrently \"cd backend && uvicorn main:app --reload\" \"cd frontend-react && npm run dev\"",
+    "dev:api": "cd backend && uvicorn main:app --reload",
+    "dev:worker": "cd backend && celery -A core.infrastructure.workers.orchestrator.celery_app worker --loglevel=info",
+    "dev:frontend": "cd frontend-react && npm run dev",
+    "build": "cd frontend-react && npm run build",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "docker:build": "docker-compose build",
+    "setup": "npm install && cd frontend-react && npm install"
+  },
+  "keywords": [
+    "lead-generation",
+    "lead-enrichment",
+    "sales-automation",
+    "web-scraping",
+    "ai",
+    "saas"
+  ],
+  "author": "LeadBoost AI Team",
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^8.2.0"
+  },
+  "directories": {
+    "doc": "docs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/anupamkr1708/leadboost-saas.git"
+  },
+  "bugs": {
+    "url": "https://github.com/anupamkr1708/leadboost-saas/issues"
+  },
+  "homepage": "https://github.com/anupamkr1708/leadboost-saas#readme"
+}

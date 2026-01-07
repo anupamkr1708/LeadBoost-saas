@@ -1,0 +1,54 @@
+# LeadBoost SaaS - Production Requirements
+
+# Core Web Framework
+fastapi>=0.104.0,<0.115.0
+uvicorn[standard]>=0.23.0,<0.30.0
+
+# Database
+sqlalchemy>=2.0.0,<3.0.0
+psycopg2-binary>=2.9.0,<3.0.0
+alembic>=1.12.0,<2.0.0
+
+# Authentication & Security
+python-jose[cryptography]>=3.3.0,<4.0.0
+passlib[bcrypt]>=1.7.0,<2.0.0
+python-multipart>=0.0.6,<1.0.0
+
+# Async Processing
+celery>=5.3.0,<6.0.0
+redis>=5.0.0,<6.0.0
+
+# Web Scraping
+playwright>=1.40.0,<2.0.0
+beautifulsoup4>=4.12.0,<5.0.0
+aiohttp>=3.8.0,<4.0.0
+requests>=2.31.0,<3.0.0
+
+# LLM Integration
+# LLM Integration with LangChain and Groq
+langchain>=0.3.0,<0.4.0
+langchain-community>=0.3.0,<0.4.0
+langchain-groq>=0.3.0,<0.4.0
+# httpx is already included for HTTP requests
+
+# Data Processing
+python-json-logger>=2.0.7,<3.0.0
+pydantic>=2.5.0,<3.0.0
+typing-extensions>=4.8.0,<5.0.0
+
+# Billing
+stripe>=8.0.0,<9.0.0
+
+# Utilities
+python-dotenv>=1.0.0,<2.0.0
+cryptography>=41.0.0,<42.0.0
+
+# Testing
+pytest>=7.4.0,<8.0.0
+pytest-asyncio>=0.21.0,<1.0.0
+httpx>=0.25.0,<1.0.0
+
+# Development (optional)
+black>=23.0.0,<24.0.0
+flake8>=6.0.0,<7.0.0
+mypy>=1.7.0,<2.0.0
