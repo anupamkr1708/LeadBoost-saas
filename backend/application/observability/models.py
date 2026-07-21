@@ -1,12 +1,13 @@
 """
 Observability models.
 
-Three new, additive tables, each mapping directly to one of the production
--polish requirements:
+Four new, additive tables, each mapping directly to one of the production
+-polish / discovery-layer requirements:
 
-  PipelineExecutionRecord  -> Pipeline Metrics (#1)
-  EvaluationReportRecord   -> Evaluation Persistence (#3)
-  PromptExecutionRecord    -> Prompt Version Tracking (#4)
+  PipelineExecutionRecord  -> Pipeline Metrics
+  EvaluationReportRecord   -> Evaluation Persistence
+  PromptExecutionRecord    -> Prompt Version Tracking
+  DiscoveryRunRecord       -> Discovery Layer Metrics
 
 These reuse the existing `Base`/engine from core.infrastructure.database
 (the same SQLAlchemy metadata Lead/Organization/etc. are registered on),
@@ -105,3 +106,33 @@ class PromptExecutionRecord(Base):
     retry_count = Column(Integer, default=0)
 
     executed_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class DiscoveryRunRecord(Base):
+    """One row per DiscoveryService.discover_and_create_leads() call. See
+    application.discovery.discovery_service for how this is written and
+    application.observability.metrics_service for how it is aggregated
+    into Discovery Success Rate / Website Resolution Rate / Duplicate
+    Removal Rate / Average Discovery Time."""
+
+    __tablename__ = "discovery_run_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(
+        Integer, ForeignKey("organizations.id"), nullable=False, index=True
+    )
+
+    query = Column(String, nullable=False)
+    category = Column(String, nullable=True)
+    location = Column(String, nullable=True)
+    requested_limit = Column(Integer, default=0)
+
+    businesses_returned = Column(Integer, default=0)  # from the search provider
+    businesses_missing_website = Column(Integer, default=0)  # had no website from the provider
+    websites_resolved_via_fallback = Column(Integer, default=0)  # Brave successfully resolved
+    duplicates_removed = Column(Integer, default=0)
+    validated_leads = Column(Integer, default=0)  # businesses that became a Lead
+
+    duration_ms = Column(Integer, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

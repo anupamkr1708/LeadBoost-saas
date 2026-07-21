@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 import time
 
 from core.infrastructure.database import init_db, get_db
-from api.endpoints import leads, auth, organizations, billing, analytics
+from api.endpoints import leads, auth, organizations, billing, analytics, discovery
 from core.infrastructure.logging import setup_logging
 
 # Load environment variables
@@ -186,6 +186,7 @@ app.include_router(leads.router, prefix="/api/v2", tags=["leads"])
 app.include_router(organizations.router, prefix="/api/v2", tags=["organizations"])
 app.include_router(billing.router, prefix="/api/v2", tags=["billing"])
 app.include_router(analytics.router, prefix="/api/v2", tags=["analytics"])
+app.include_router(discovery.router, prefix="/api/v2", tags=["discovery"])
 
 
 # Health check endpoints

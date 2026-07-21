@@ -21,7 +21,12 @@ from typing import List, Optional
 
 from sqlalchemy.orm import Session
 
-from application.dto.models import EvaluationMetricsSummary, PipelineMetricsSummary, PipelineStatus
+from application.dto.models import (
+    DiscoveryMetricsSummary,
+    EvaluationMetricsSummary,
+    PipelineMetricsSummary,
+    PipelineStatus,
+)
 from application.observability import repository
 
 
@@ -83,6 +88,50 @@ class AnalyticsService:
             average_completeness=self._avg([r.completeness for r in records]),
             average_grounding=self._avg([r.grounding for r in records]),
             average_consistency=self._avg([r.consistency for r in records]),
+        )
+
+    def get_discovery_metrics(
+        self, organization_id: Optional[int] = None, since: Optional[datetime] = None
+    ) -> DiscoveryMetricsSummary:
+        records = repository.get_discovery_runs(
+            self.db, organization_id=organization_id, since=since
+        )
+        total_runs = len(records)
+        if total_runs == 0:
+            return DiscoveryMetricsSummary()
+
+        total_businesses = sum(r.businesses_returned for r in records)
+        total_leads = sum(r.validated_leads for r in records)
+        total_missing_website = sum(r.businesses_missing_website for r in records)
+        total_resolved_via_fallback = sum(r.websites_resolved_via_fallback for r in records)
+        total_duplicates = sum(r.duplicates_removed for r in records)
+        durations = [r.duration_ms for r in records if r.duration_ms is not None]
+
+        # Discovery Success Rate = validated leads / businesses returned.
+        discovery_success_rate = (
+            round((total_leads / total_businesses) * 100, 2) if total_businesses else 0.0
+        )
+        # Website Resolution Rate = of the businesses the search provider
+        # returned with *no* website, what fraction did the Brave fallback
+        # successfully resolve and validate.
+        website_resolution_rate = (
+            round((total_resolved_via_fallback / total_missing_website) * 100, 2)
+            if total_missing_website
+            else 0.0
+        )
+        # Duplicate Removal Rate = duplicates removed / businesses returned.
+        duplicate_removal_rate = (
+            round((total_duplicates / total_businesses) * 100, 2) if total_businesses else 0.0
+        )
+
+        return DiscoveryMetricsSummary(
+            total_discovery_runs=total_runs,
+            total_businesses_found=total_businesses,
+            total_leads_created=total_leads,
+            discovery_success_rate_pct=discovery_success_rate,
+            website_resolution_rate_pct=website_resolution_rate,
+            duplicate_removal_rate_pct=duplicate_removal_rate,
+            avg_discovery_time_ms=self._avg(durations),
         )
 
     @staticmethod

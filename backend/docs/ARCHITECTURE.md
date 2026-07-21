@@ -9,6 +9,10 @@ now measured, logged, and made queryable.
 No existing agent, prompt, workflow edge, or evaluation formula was changed.
 Everything below is additive instrumentation around the existing system.
 
+> **Business Discovery Layer** (natural-language search -> validated Leads,
+> feeding into the pipeline described below) is documented separately in
+> [`DISCOVERY.md`](./DISCOVERY.md).
+
 ---
 
 ## 1. Pipeline Execution Lifecycle

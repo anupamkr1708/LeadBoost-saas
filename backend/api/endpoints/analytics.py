@@ -7,8 +7,11 @@ exact same router/auth/db-session conventions as the existing endpoint
 modules (organizations.py, billing.py) -- no new auth mechanism, no new
 router pattern.
 
-Both endpoints are scoped to the current user's organization, matching how
-every other endpoint in this API already scopes data.
+All endpoints are scoped to the current user's organization, matching how
+every other endpoint in this API already scopes data. discovery-metrics
+extends this same router/module (per the Discovery Layer spec: "integrate
+with the existing analytics endpoints, do not create another analytics
+framework") rather than living in a separate file.
 """
 
 from datetime import datetime, timedelta, timezone
@@ -17,7 +20,11 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from application.dto.models import EvaluationMetricsSummary, PipelineMetricsSummary
+from application.dto.models import (
+    DiscoveryMetricsSummary,
+    EvaluationMetricsSummary,
+    PipelineMetricsSummary,
+)
 from application.observability.metrics_service import AnalyticsService
 from core.domain.models.user import User
 from core.infrastructure.auth.security import get_current_user
@@ -67,6 +74,28 @@ async def get_evaluation_metrics(
     """
     service = AnalyticsService(db)
     return service.get_evaluation_metrics(
+        organization_id=current_user.organization_id,
+        since=_since_from_hours(hours),
+    )
+
+
+@router.get("/discovery-metrics", response_model=DiscoveryMetricsSummary)
+async def get_discovery_metrics(
+    hours: Optional[int] = Query(
+        default=None,
+        description="Only include discovery runs from the last N hours. Omit for all-time.",
+    ),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Any:
+    """
+    Discovery Success Rate, Website Resolution Rate, Duplicate Removal
+    Rate, and Average Discovery Time for the current user's organization.
+    See application.discovery and application.observability.metrics_service
+    for exactly how each is calculated.
+    """
+    service = AnalyticsService(db)
+    return service.get_discovery_metrics(
         organization_id=current_user.organization_id,
         since=_since_from_hours(hours),
     )

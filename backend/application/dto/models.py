@@ -150,3 +150,17 @@ class EvaluationMetricsSummary(BaseModel):
     average_completeness: float = 0.0
     average_grounding: float = 0.0
     average_consistency: float = 0.0
+
+
+class DiscoveryMetricsSummary(BaseModel):
+    """Aggregated Business Discovery Layer metrics, served by the
+    Analytics API. See application.discovery and
+    application.observability.metrics_service for how these are computed."""
+
+    total_discovery_runs: int = 0
+    total_businesses_found: int = 0
+    total_leads_created: int = 0
+    discovery_success_rate_pct: float = 0.0
+    website_resolution_rate_pct: float = 0.0
+    duplicate_removal_rate_pct: float = 0.0
+    avg_discovery_time_ms: float = 0.0

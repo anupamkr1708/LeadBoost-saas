@@ -191,3 +191,80 @@ def test_evaluation_metrics_averages_across_reports(db_session, sample_org, samp
     summary = service.get_evaluation_metrics(organization_id=sample_org.id)
     assert summary.total_evaluations == 2
     assert summary.average_overall_score == 0.6
+
+
+# -- AnalyticsService: discovery metrics ---------------------------------------
+
+
+def test_discovery_metrics_empty_returns_zeroed_summary(db_session, sample_org):
+    service = AnalyticsService(db_session)
+    summary = service.get_discovery_metrics(organization_id=sample_org.id)
+    assert summary.total_discovery_runs == 0
+    assert summary.discovery_success_rate_pct == 0.0
+
+
+def test_discovery_metrics_success_rate_and_counts(db_session, sample_org):
+    repository.create_discovery_run_record(
+        db_session,
+        organization_id=sample_org.id,
+        query="Top shoe stores in Mumbai",
+        category="shoe stores",
+        location="Mumbai",
+        requested_limit=20,
+        businesses_returned=10,
+        businesses_missing_website=4,
+        websites_resolved_via_fallback=2,
+        duplicates_removed=1,
+        validated_leads=7,
+        duration_ms=1500,
+    )
+    repository.create_discovery_run_record(
+        db_session,
+        organization_id=sample_org.id,
+        query="Dentists in Pune",
+        category="dentists",
+        location="Pune",
+        requested_limit=20,
+        businesses_returned=6,
+        businesses_missing_website=2,
+        websites_resolved_via_fallback=1,
+        duplicates_removed=0,
+        validated_leads=5,
+        duration_ms=900,
+    )
+
+    service = AnalyticsService(db_session)
+    summary = service.get_discovery_metrics(organization_id=sample_org.id)
+
+    assert summary.total_discovery_runs == 2
+    assert summary.total_businesses_found == 16
+    assert summary.total_leads_created == 12
+    # discovery_success_rate = validated_leads / businesses_returned = 12/16 = 75%
+    assert summary.discovery_success_rate_pct == 75.0
+    # website_resolution_rate = resolved_via_fallback / missing_website = 3/6 = 50%
+    assert summary.website_resolution_rate_pct == 50.0
+    # duplicate_removal_rate = duplicates_removed / businesses_returned = 1/16
+    assert summary.duplicate_removal_rate_pct == round(1 / 16 * 100, 2)
+    assert summary.avg_discovery_time_ms == 1200.0
+
+
+def test_discovery_metrics_scoped_by_organization(db_session, sample_org):
+    repository.create_discovery_run_record(
+        db_session,
+        organization_id=sample_org.id,
+        query="Hotels in Goa",
+        category="hotels",
+        location="Goa",
+        requested_limit=20,
+        businesses_returned=5,
+        businesses_missing_website=0,
+        websites_resolved_via_fallback=0,
+        duplicates_removed=0,
+        validated_leads=5,
+        duration_ms=500,
+    )
+
+    other_org_id = sample_org.id + 999
+    service = AnalyticsService(db_session)
+    summary = service.get_discovery_metrics(organization_id=other_org_id)
+    assert summary.total_discovery_runs == 0

@@ -13,6 +13,7 @@ from typing import List, Optional
 from sqlalchemy.orm import Session
 
 from application.observability.models import (
+    DiscoveryRunRecord,
     EvaluationReportRecord,
     PipelineExecutionRecord,
     PromptExecutionRecord,
@@ -147,4 +148,52 @@ def get_prompt_executions(
         query = query.filter(PromptExecutionRecord.prompt_name == prompt_name)
     if since is not None:
         query = query.filter(PromptExecutionRecord.executed_at >= since)
+    return query.all()
+
+
+def create_discovery_run_record(
+    db: Session,
+    *,
+    organization_id: int,
+    query: str,
+    category: Optional[str],
+    location: Optional[str],
+    requested_limit: int,
+    businesses_returned: int,
+    businesses_missing_website: int,
+    websites_resolved_via_fallback: int,
+    duplicates_removed: int,
+    validated_leads: int,
+    duration_ms: int,
+) -> DiscoveryRunRecord:
+    record = DiscoveryRunRecord(
+        organization_id=organization_id,
+        query=query,
+        category=category,
+        location=location,
+        requested_limit=requested_limit,
+        businesses_returned=businesses_returned,
+        businesses_missing_website=businesses_missing_website,
+        websites_resolved_via_fallback=websites_resolved_via_fallback,
+        duplicates_removed=duplicates_removed,
+        validated_leads=validated_leads,
+        duration_ms=duration_ms,
+    )
+    db.add(record)
+    db.commit()
+    db.refresh(record)
+    return record
+
+
+def get_discovery_runs(
+    db: Session,
+    *,
+    organization_id: Optional[int] = None,
+    since: Optional[datetime] = None,
+) -> List[DiscoveryRunRecord]:
+    query = db.query(DiscoveryRunRecord)
+    if organization_id is not None:
+        query = query.filter(DiscoveryRunRecord.organization_id == organization_id)
+    if since is not None:
+        query = query.filter(DiscoveryRunRecord.created_at >= since)
     return query.all()
