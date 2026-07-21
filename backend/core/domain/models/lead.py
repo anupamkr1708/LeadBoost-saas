@@ -111,3 +111,68 @@ class ScrapingLog(Base):
 
     # Relationship
     lead = relationship("Lead", back_populates="scraping_logs")
+
+
+class AIDecisionLog(Base):
+    """
+    Audit trail for every AI agent decision made by the Application layer.
+
+    This is the single additive schema change introduced for the new
+    AI Application layer (backend/application/). It follows the exact same
+    pattern as ScrapingLog / LeadEnrichmentLog above (a lead-scoped,
+    append-only log table) so it fits naturally alongside the existing
+    logging tables rather than introducing a new data-access pattern.
+
+    It serves three purposes simultaneously, by design, to avoid
+    proliferating multiple near-identical tables:
+      1. Explainability: every row is a self-contained record of what an
+         agent decided, why (reasoning + evidence), and how confident it was.
+      2. Business memory: application/memory reads this table to recall
+         previous company analyses, decisions, and outreach for a lead.
+      3. Evaluation/analytics: confidence/completeness/grounding scores are
+         stored per stage to support future continuous evaluation.
+
+    No existing table or column is modified. This table is only ever
+    written to by backend/application/ and is additive-only.
+    """
+
+    __tablename__ = "ai_decision_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    lead_id = Column(Integer, ForeignKey("leads.id"), nullable=False)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False)
+
+    # Which pipeline stage / agent produced this record
+    stage = Column(
+        String, nullable=False, index=True
+    )  # company_intelligence, decision, review, messaging, evaluation
+    agent_name = Column(String, nullable=False)
+
+    # Structured agent output (JSON-serialized DTO)
+    output_data = Column(Text, nullable=True)
+
+    # Explainability
+    reasoning = Column(Text, nullable=True)
+    evidence = Column(Text, nullable=True)  # JSON list of supporting evidence strings
+    confidence = Column(Float, default=0.0)
+
+    # Evaluation metrics (see application/evaluation)
+    completeness_score = Column(Float, nullable=True)
+    grounding_score = Column(Float, nullable=True)
+    consistency_score = Column(Float, nullable=True)
+
+    # Review Agent routing outcome, when applicable
+    review_status = Column(String, nullable=True)  # auto_approved, flagged, human_review
+
+    # Provenance
+    model_used = Column(String, nullable=True)
+    prompt_name = Column(String, nullable=True)
+    prompt_version = Column(String, nullable=True)
+    processing_time_ms = Column(Integer, nullable=True)
+    success = Column(Boolean, default=True)
+    error_message = Column(Text, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationship
+    lead = relationship("Lead")

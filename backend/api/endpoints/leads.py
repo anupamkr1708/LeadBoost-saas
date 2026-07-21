@@ -19,10 +19,11 @@ from core.infrastructure.database.crud import (
     get_leads_by_organization,
     update_lead,
     delete_lead,
+    get_lead_by_url,
 )
 from core.infrastructure.scraping.scraper import get_scraper, TieredScraper
 from core.infrastructure.logging import get_logger, log_scraping_attempt
-from core.infrastructure.workers.orchestrator import process_lead_async
+from application.workflows.lead_pipeline import run_lead_pipeline
 from core.infrastructure.billing.subscription_service import SubscriptionService
 
 logger = get_logger(__name__)
@@ -42,46 +43,137 @@ async def create_leads_from_urls(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> Any:
-    """Create leads from URLs and start processing in background"""
+    """
+    Create leads from URLs with deduplication and atomic quota checking
+    """
     urls = request.urls
     message_style = request.message_style
 
+    # Validate input
     if not urls:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="No URLs provided"
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No URLs provided"
+        )
+    
+    if len(urls) > 100:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Maximum 100 URLs per request"
         )
 
-    # Check subscription limits
+    # Deduplicate and normalize URLs
+    unique_urls = list(set(url.strip().lower() for url in urls if url.strip()))
+    
+    if not unique_urls:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No valid URLs provided"
+        )
+
     subscription_service = SubscriptionService(db)
-    if not subscription_service.can_create_lead(current_user.organization_id):
+    
+    try:
+        # Start transaction for atomic quota check + lead creation
+        # Filter out already existing leads
+        new_urls = []
+        existing_leads = []
+        
+        for url in unique_urls:
+            existing = get_lead_by_url(db, url, current_user.organization_id)
+            if existing:
+                existing_leads.append(existing)
+                logger.info(
+                    "Lead already exists for URL",
+                    extra={
+                        "url": url,
+                        "lead_id": existing.id,
+                        "organization_id": current_user.organization_id,
+                    }
+                )
+            else:
+                new_urls.append(url)
+        
+        # Check if we need to create any new leads
+        if not new_urls:
+            logger.info(
+                "All URLs already exist as leads",
+                extra={
+                    "organization_id": current_user.organization_id,
+                    "user_id": current_user.id,
+                    "urls_count": len(urls),
+                }
+            )
+            return existing_leads
+        
+        # Check quota atomically
+        usage = subscription_service.get_organization_usage(current_user.organization_id)
+        
+        if len(new_urls) > usage.remaining_daily_leads:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=f"Daily lead limit exceeded. Remaining: {usage.remaining_daily_leads}, Requested: {len(new_urls)}"
+            )
+        
+        # Create all new leads in single transaction
+        created_leads = []
+        for url in new_urls:
+            lead_create = LeadCreate(
+                website=url,
+                organization_id=current_user.organization_id,
+                owner_id=current_user.id,
+            )
+            db_lead = create_lead(db, lead_create)
+            created_leads.append(db_lead)
+        
+        # Commit all leads atomically
+        db.commit()
+        
+        # Refresh all leads to get updated data
+        for lead in created_leads:
+            db.refresh(lead)
+        
+        # Schedule processing after successful commit
+        for lead in created_leads:
+            # Runs the LangGraph-based Application-layer pipeline
+            # (application/workflows/lead_pipeline.py) as a FastAPI
+            # background task, opening its own DB session.
+            background_tasks.add_task(run_lead_pipeline, lead.id)
+        
+        logger.info(
+            "Leads created successfully",
+            extra={
+                "organization_id": current_user.organization_id,
+                "user_id": current_user.id,
+                "new_leads_count": len(created_leads),
+                "existing_leads_count": len(existing_leads),
+                "lead_ids": [lead.id for lead in created_leads],
+            }
+        )
+        
+        # Return both new and existing leads
+        all_leads = created_leads + existing_leads
+        return all_leads
+
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(
+            "Failed to create leads",
+            exc_info=True,
+            extra={
+                "organization_id": current_user.organization_id,
+                "user_id": current_user.id,
+                "urls_count": len(urls),
+                "error_type": type(e).__name__,
+            }
+        )
         raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Daily lead limit exceeded for your subscription plan",
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create leads. Please try again."
         )
-
-    # Check if we can create the requested number of leads
-    usage = subscription_service.get_organization_usage(current_user.organization_id)
-    if len(urls) > usage.remaining_daily_leads:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"Cannot create {len(urls)} leads. Only {usage.remaining_daily_leads} leads remaining for today.",
-        )
-
-    created_leads = []
-    for url in urls:
-        # Create lead record
-        lead_create = LeadCreate(
-            website=url,
-            organization_id=current_user.organization_id,
-            owner_id=current_user.id,
-        )
-        db_lead = create_lead(db, lead_create)
-        created_leads.append(db_lead)
-
-        # Process the lead in background
-        background_tasks.add_task(process_lead_async, db_lead.id)
-
-    return created_leads
 
 
 @router.post("/single", response_model=LeadSchema)
@@ -91,7 +183,7 @@ async def create_lead_endpoint(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> Any:
-    """Create a single lead and start processing in background"""
+    """Create a single lead with quota checking and deduplication"""
     # Verify user has access to the organization
     if current_user.organization_id != lead.organization_id:
         raise HTTPException(
@@ -106,21 +198,71 @@ async def create_lead_endpoint(
             detail="Not authorized to create leads for this owner",
         )
 
-    # Check subscription limits
-    subscription_service = SubscriptionService(db)
-    if not subscription_service.can_create_lead(current_user.organization_id):
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Daily lead limit exceeded for your subscription plan",
+    # Normalize URL
+    normalized_url = lead.website.strip().lower()
+    
+    try:
+        # Check for existing lead
+        existing = get_lead_by_url(db, normalized_url, current_user.organization_id)
+        if existing:
+            logger.info(
+                "Lead already exists",
+                extra={
+                    "url": normalized_url,
+                    "lead_id": existing.id,
+                    "organization_id": current_user.organization_id,
+                }
+            )
+            return existing
+
+        # Check subscription limits
+        subscription_service = SubscriptionService(db)
+        if not subscription_service.can_create_lead(current_user.organization_id):
+            usage = subscription_service.get_organization_usage(current_user.organization_id)
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=f"Daily lead limit exceeded. Remaining: {usage.remaining_daily_leads}"
+            )
+
+        # Create the lead record
+        lead.website = normalized_url
+        db_lead = create_lead(db, lead)
+        db.commit()
+        db.refresh(db_lead)
+
+        # Process the lead in background via the LangGraph LeadPipeline
+        background_tasks.add_task(run_lead_pipeline, db_lead.id)
+
+        logger.info(
+            "Lead created successfully",
+            extra={
+                "lead_id": db_lead.id,
+                "url": normalized_url,
+                "organization_id": current_user.organization_id,
+                "user_id": current_user.id,
+            }
         )
 
-    # Create the lead record
-    db_lead = create_lead(db, lead)
+        return db_lead
 
-    # Process the lead in background
-    background_tasks.add_task(process_lead_async, db_lead.id)
-
-    return db_lead
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(
+            "Failed to create lead",
+            exc_info=True,
+            extra={
+                "url": lead.website,
+                "organization_id": current_user.organization_id,
+                "error_type": type(e).__name__,
+            }
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create lead. Please try again."
+        )
 
 
 @router.get("/", response_model=List[LeadSchema])
@@ -130,10 +272,35 @@ async def read_leads(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> Any:
-    """Get leads for current user's organization"""
+    """Get leads for current user's organization with pagination"""
+    # Validate pagination params
+    if skip < 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Skip parameter must be >= 0"
+        )
+    
+    if limit < 1 or limit > 1000:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Limit must be between 1 and 1000"
+        )
+    
     leads = get_leads_by_organization(
         db, organization_id=current_user.organization_id, skip=skip, limit=limit
     )
+    
+    logger.info(
+        "Leads retrieved",
+        extra={
+            "organization_id": current_user.organization_id,
+            "user_id": current_user.id,
+            "count": len(leads),
+            "skip": skip,
+            "limit": limit,
+        }
+    )
+    
     return leads
 
 
@@ -247,7 +414,7 @@ async def process_lead_now(
             detail="AI features are not available on your subscription plan",
         )
 
-    # Process the lead now
-    await process_lead_async(lead_id)
+    # Process the lead now via the LangGraph LeadPipeline
+    await run_lead_pipeline(lead_id)
 
     return {"message": "Lead processing started", "lead_id": lead_id}

@@ -30,6 +30,22 @@ class LeadUpdate(BaseModel):
     twitter_url: Optional[str] = None
     facebook_url: Optional[str] = None
     employees: Optional[str] = None
+    # NOTE: the six fields below were previously missing from this schema
+    # even though they are real columns on the Lead model (see
+    # core/domain/models/lead.py) and core/infrastructure/workers/
+    # orchestrator.py already attempted to set them via LeadUpdate(**dict).
+    # Because Pydantic v2 silently drops unrecognized constructor kwargs
+    # (default extra="ignore") and update_lead() uses
+    # `.dict(exclude_unset=True)`, those update calls were a silent no-op:
+    # scrape/enrichment confidence, source, score, and qualification_label
+    # were never actually persisted. Adding them here is a schema-validation
+    # fix, not a database change -- the underlying columns already exist.
+    score: Optional[float] = None
+    qualification_label: Optional[str] = None
+    scrape_confidence: Optional[float] = None
+    scrape_source: Optional[str] = None
+    enrichment_confidence: Optional[float] = None
+    enrichment_source: Optional[str] = None
     revenue_band: Optional[str] = None
     founded_year: Optional[int] = None
     outreach_message: Optional[str] = None

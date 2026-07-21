@@ -1,0 +1,53 @@
+name: decision
+version: v1
+description: >
+  Combines the deterministic lead score, company intelligence, and
+  enrichment data into a single qualification decision with reasoning and
+  supporting evidence. Exactly one LLM call; never invoked more than once
+  per lead per pipeline run.
+variables:
+  - company_name
+  - website
+  - score
+  - qualification_label
+  - industry_analysis
+  - pain_points
+  - growth_indicators
+  - icp_alignment_score
+output_schema:
+  type: object
+  properties:
+    qualification: { type: string, enum: ["Hot Lead", "Warm Lead", "Cold Lead", "Disqualified"] }
+    recommended_action: { type: string, enum: ["proceed", "review", "reject"] }
+    reasoning: { type: string }
+    evidence: { type: array, items: { type: string } }
+    confidence: { type: number, minimum: 0, maximum: 1 }
+messages:
+  - role: system
+    template: >
+      You are a sales operations decision engine. You are given a
+      deterministic lead score plus AI-derived company intelligence.
+      Combine them into a single qualification decision. Do not
+      re-derive the score yourself -- treat the provided score and
+      qualification label as ground truth signals, and use the company
+      intelligence to sanity-check and explain them. Respond ONLY with a
+      single valid JSON object, no extra commentary.
+  - role: human
+    template: |
+      Company: {company_name}
+      Website: {website}
+      Deterministic Score (0-100): {score}
+      Deterministic Qualification Label: {qualification_label}
+      Industry Analysis: {industry_analysis}
+      Pain Points: {pain_points}
+      Growth Indicators: {growth_indicators}
+      ICP Alignment Score (0-1): {icp_alignment_score}
+
+      Return a JSON object with exactly these fields:
+      {{
+        "qualification": "Hot Lead | Warm Lead | Cold Lead | Disqualified",
+        "recommended_action": "proceed | review | reject",
+        "reasoning": "2-4 sentences explaining the decision",
+        "evidence": ["short facts from the inputs above that support the decision"],
+        "confidence": 0.0
+      }}

@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
 from core.domain.models.user import User
 from core.domain.models.organization import Organization
-from core.domain.models.lead import Lead, LeadEnrichmentLog, ScrapingLog
+from core.domain.models.lead import Lead, LeadEnrichmentLog, ScrapingLog, AIDecisionLog
 from core.domain.models.api_key import APIKey
 from core.domain.models.billing import Subscription, UsageRecord, Invoice
 from core.domain.schemas.user import UserCreate, UserUpdate, UserInDB
@@ -127,6 +127,14 @@ def create_lead(db: Session, lead: LeadCreate) -> Lead:
 def get_lead(db: Session, lead_id: int) -> Optional[Lead]:
     """Get a lead by ID"""
     return db.query(Lead).filter(Lead.id == lead_id).first()
+
+
+def get_lead_by_url(db: Session, url: str, organization_id: int) -> Optional[Lead]:
+    """Get a lead by website URL and organization (for deduplication)"""
+    return db.query(Lead).filter(
+        Lead.website == url,
+        Lead.organization_id == organization_id
+    ).first()
 
 
 def get_leads_by_organization(
@@ -307,6 +315,78 @@ def create_lead_enrichment_log(
     db.commit()
     db.refresh(db_log)
     return db_log
+
+
+# AI decision log CRUD operations (used by backend/application for
+# explainability, business memory, and evaluation persistence)
+def create_ai_decision_log(
+    db: Session,
+    lead_id: int,
+    organization_id: int,
+    stage: str,
+    agent_name: str,
+    output_data: Optional[str] = None,
+    reasoning: Optional[str] = None,
+    evidence: Optional[str] = None,
+    confidence: float = 0.0,
+    completeness_score: Optional[float] = None,
+    grounding_score: Optional[float] = None,
+    consistency_score: Optional[float] = None,
+    review_status: Optional[str] = None,
+    model_used: Optional[str] = None,
+    prompt_name: Optional[str] = None,
+    prompt_version: Optional[str] = None,
+    processing_time_ms: Optional[int] = None,
+    success: bool = True,
+    error_message: Optional[str] = None,
+) -> AIDecisionLog:
+    """Create a new AI decision log entry (one row per agent stage per lead)."""
+    db_log = AIDecisionLog(
+        lead_id=lead_id,
+        organization_id=organization_id,
+        stage=stage,
+        agent_name=agent_name,
+        output_data=output_data,
+        reasoning=reasoning,
+        evidence=evidence,
+        confidence=confidence,
+        completeness_score=completeness_score,
+        grounding_score=grounding_score,
+        consistency_score=consistency_score,
+        review_status=review_status,
+        model_used=model_used,
+        prompt_name=prompt_name,
+        prompt_version=prompt_version,
+        processing_time_ms=processing_time_ms,
+        success=success,
+        error_message=error_message,
+    )
+    db.add(db_log)
+    db.commit()
+    db.refresh(db_log)
+    return db_log
+
+
+def get_ai_decision_logs_by_lead(
+    db: Session, lead_id: int, stage: Optional[str] = None, limit: int = 50
+) -> List[AIDecisionLog]:
+    """Get AI decision logs for a lead, optionally filtered by stage, most recent first."""
+    query = db.query(AIDecisionLog).filter(AIDecisionLog.lead_id == lead_id)
+    if stage:
+        query = query.filter(AIDecisionLog.stage == stage)
+    return query.order_by(AIDecisionLog.created_at.desc()).limit(limit).all()
+
+
+def get_ai_decision_logs_by_organization(
+    db: Session, organization_id: int, stage: Optional[str] = None, limit: int = 50
+) -> List[AIDecisionLog]:
+    """Get recent AI decision logs across an organization, optionally filtered by stage."""
+    query = db.query(AIDecisionLog).filter(
+        AIDecisionLog.organization_id == organization_id
+    )
+    if stage:
+        query = query.filter(AIDecisionLog.stage == stage)
+    return query.order_by(AIDecisionLog.created_at.desc()).limit(limit).all()
 
 
 # Scraping log CRUD operations

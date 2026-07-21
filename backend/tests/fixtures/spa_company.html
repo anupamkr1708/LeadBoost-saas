@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Loading...</title>
+<meta name="description" content="loading">
+<script src="http://googletagmanager.com/gtag/js"></script>
+<script src="http://google-analytics.com/analytics.js"></script>
+</head>
+<body>
+<div id="root">Loading application...</div>
+<script>
+// Simulate a React/Vue SPA that renders content client-side after "hydration"
+setTimeout(function() {
+  document.title = "Nimbus Cloud Storage | Home";
+  var meta = document.querySelector('meta[name="description"]');
+  meta.setAttribute('content', 'Nimbus Cloud Storage provides secure, encrypted cloud backup for businesses.');
+
+  var ld = document.createElement('script');
+  ld.type = 'application/ld+json';
+  ld.text = JSON.stringify({
+    "@context": "https://schema.org",
+    "@type": "Organization",
+    "name": "Nimbus Cloud Storage",
+    "foundingDate": "2018-01-01",
+    "sameAs": ["https://www.linkedin.com/company/nimbuscloud"],
+    "contactPoint": [{"@type":"ContactPoint","contactType":"sales","email":"sales@nimbuscloud.io"}]
+  });
+  document.head.appendChild(ld);
+
+  document.getElementById('root').innerHTML =
+    '<nav><a href="/about">About</a><a href="/contact">Contact</a><a href="/careers">Careers</a></nav>' +
+    '<main><h1>Nimbus Cloud Storage</h1>' +
+    '<p>Founded in 2018, Nimbus now serves over 4,000 customers worldwide with encrypted, ' +
+    'zero-knowledge cloud backup. Email us at hello@nimbuscloud.io or call (415) 555-0142.</p></main>';
+}, 300);
+</script>
+</body>
+</html>

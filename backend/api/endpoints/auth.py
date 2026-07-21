@@ -33,16 +33,17 @@ router = APIRouter()
 
 @router.post("/register", response_model=UserSchema)
 async def register_user(user: UserCreate, db: Session = Depends(get_db)) -> Any:
-    """Register a new user"""
-    try:
-        # Check if user already exists
-        db_user = get_user_by_email(db, email=user.email)
-        if db_user:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Email already registered",
-            )
+    """Register a new user with atomic transaction"""
+    # Check if user already exists (outside transaction for performance)
+    db_user = get_user_by_email(db, email=user.email)
+    if db_user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email already registered",
+        )
 
+    try:
+        # All operations in single transaction
         # Create organization for the new user (for multi-tenancy)
         org_data = OrganizationCreate(
             name=f"{user.first_name or 'User'}'s Organization",
@@ -51,42 +52,61 @@ async def register_user(user: UserCreate, db: Session = Depends(get_db)) -> Any:
         db_org = create_organization(db, org_data)
 
         # Create user with the new organization ID
-        # Create user with the new organization ID
         db_user = User(
             email=user.email,
-            hashed_password=get_password_hash(
-                user.password[:72] if len(user.password) > 72 else user.password
-            ),
+            hashed_password=get_password_hash(user.password),
             first_name=user.first_name,
             last_name=user.last_name,
             organization_id=db_org.id,
         )
         db.add(db_user)
+        db.flush()  # Get IDs without committing
 
-        db.commit()
-        db.refresh(db_user)
-
-        # Assign default subscription plan to the organization
+        # Assign default subscription plan
         from core.infrastructure.billing.subscription_service import SubscriptionService
-
         subscription_service = SubscriptionService(db)
         default_plan = os.getenv("DEFAULT_PLAN", "free")
         subscription_service.assign_plan_to_organization(db_org.id, default_plan)
 
+        # Commit all changes atomically
+        db.commit()
+        db.refresh(db_user)
+
+        # Log successful registration
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(
+            "User registered successfully",
+            extra={
+                "user_id": db_user.id,
+                "email": db_user.email,
+                "organization_id": db_org.id,
+                "plan": default_plan,
+            }
+        )
+
         return db_user
+
     except HTTPException:
-        # Re-raise HTTP exceptions as they are
+        # Re-raise HTTP exceptions as-is
+        db.rollback()
         raise
     except Exception as e:
-        # Log the error for debugging
+        # Rollback and log unexpected errors
+        db.rollback()
         import logging
-
         logger = logging.getLogger(__name__)
-        logger.error(f"Registration error: {str(e)}", exc_info=True)
-        db.rollback()  # Rollback the transaction in case of error
+        logger.error(
+            "Registration failed",
+            exc_info=True,
+            extra={
+                "email": user.email,
+                "error_type": type(e).__name__,
+            }
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Registration failed: {str(e)}",
+            detail="Registration failed. Please try again.",
         )
 
 
@@ -95,8 +115,18 @@ async def login_user(
     form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)
 ) -> Any:
     """Login user and return access token"""
+    import logging
+    logger = logging.getLogger(__name__)
+    
     user = get_user_by_email(db, email=form_data.username)
     if not user or not verify_password(form_data.password, user.hashed_password):
+        logger.warning(
+            "Failed login attempt",
+            extra={
+                "email": form_data.username,
+                "reason": "invalid_credentials",
+            }
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
@@ -104,6 +134,14 @@ async def login_user(
         )
 
     if not user.is_active:
+        logger.warning(
+            "Failed login attempt",
+            extra={
+                "email": form_data.username,
+                "user_id": user.id,
+                "reason": "inactive_user",
+            }
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Inactive user",
@@ -118,6 +156,15 @@ async def login_user(
 
     # Create refresh token
     refresh_token = create_refresh_token(data={"sub": str(user.id)})
+
+    logger.info(
+        "User logged in successfully",
+        extra={
+            "user_id": user.id,
+            "email": user.email,
+            "organization_id": user.organization_id,
+        }
+    )
 
     return {
         "access_token": access_token,

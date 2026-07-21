@@ -11,6 +11,10 @@ alembic>=1.12.0,<2.0.0
 
 # Authentication & Security
 python-jose[cryptography]>=3.3.0,<4.0.0
+# core/infrastructure/auth/security.py does `import jwt` / `jwt.PyJWTError`,
+# which is PyJWT's API surface, not python-jose's. Pre-existing gap: main.py
+# fails to import at all (via api/endpoints/auth.py) without this.
+PyJWT>=2.8.0,<3.0.0
 passlib[bcrypt]>=1.7.0,<2.0.0
 python-multipart>=0.0.6,<1.0.0
 
@@ -26,6 +30,7 @@ requests>=2.31.0,<3.0.0
 
 # LLM Integration
 # LLM Integration with LangChain and Groq
+langgraph
 langchain>=0.3.0,<0.4.0
 langchain-community>=0.3.0,<0.4.0
 langchain-groq>=0.3.0,<0.4.0
@@ -35,6 +40,9 @@ langchain-groq>=0.3.0,<0.4.0
 python-json-logger>=2.0.7,<3.0.0
 pydantic>=2.5.0,<3.0.0
 typing-extensions>=4.8.0,<5.0.0
+# Required transitively by pydantic's EmailStr (used in core/domain/schemas/user.py).
+# Pre-existing gap: without this, the application fails to import at all.
+email-validator>=2.0.0,<3.0.0
 
 # Billing
 stripe>=8.0.0,<9.0.0

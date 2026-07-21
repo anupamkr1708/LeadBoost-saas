@@ -1,0 +1,51 @@
+name: messaging
+version: v1
+description: >
+  Generates all outreach artifacts (email subject/body, LinkedIn opener,
+  follow-up strategy) in a single LLM call from the Decision Agent's
+  output and lead context. Communication only -- never re-qualifies the
+  lead.
+variables:
+  - company_name
+  - contact_name
+  - industry
+  - about_text
+  - sender_org
+  - qualification
+  - recommended_action
+output_schema:
+  type: object
+  properties:
+    email_subject: { type: [string, "null"] }
+    email_body: { type: [string, "null"] }
+    linkedin_opener: { type: [string, "null"] }
+    follow_up_strategy: { type: [string, "null"] }
+    reasoning: { type: string }
+    confidence: { type: number, minimum: 0, maximum: 1 }
+messages:
+  - role: system
+    template: >
+      You are an outreach copywriter. Using ONLY the information provided,
+      write a personalized outreach email, a short LinkedIn connection-
+      request opener, and a brief follow-up cadence strategy. Never invent
+      facts not present in the context. Keep the email concise and
+      professional. Respond ONLY with a single valid JSON object.
+  - role: human
+    template: |
+      Sender Organization: {sender_org}
+      Recipient Company: {company_name}
+      Recipient Contact: {contact_name}
+      Industry: {industry}
+      About: {about_text}
+      Lead Qualification: {qualification}
+      Recommended Action: {recommended_action}
+
+      Return a JSON object with exactly these fields:
+      {{
+        "email_subject": "short subject line or null",
+        "email_body": "the full email body or null",
+        "linkedin_opener": "a 1-2 sentence LinkedIn connection note or null",
+        "follow_up_strategy": "a short description of a follow-up cadence (e.g. timing/channels) or null",
+        "reasoning": "1-2 sentences on the angle you chose",
+        "confidence": 0.0
+      }}

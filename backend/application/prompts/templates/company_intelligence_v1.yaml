@@ -1,0 +1,60 @@
+name: company_intelligence
+version: v1
+description: >
+  Analyzes an enriched lead's company, website, industry, technology,
+  market position, pain points, and growth indicators. Produces structured
+  intelligence only -- never outreach copy.
+variables:
+  - company_name
+  - website
+  - industry
+  - employees
+  - about_text
+  - website_content
+output_schema:
+  type: object
+  properties:
+    industry_analysis: { type: [string, "null"] }
+    website_quality: { type: [string, "null"] }
+    technology_signals: { type: array, items: { type: string } }
+    market_position: { type: [string, "null"] }
+    pain_points: { type: array, items: { type: string } }
+    growth_indicators: { type: array, items: { type: string } }
+    icp_alignment_score: { type: number, minimum: 0, maximum: 1 }
+    reasoning: { type: string }
+    evidence: { type: array, items: { type: string } }
+    confidence: { type: number, minimum: 0, maximum: 1 }
+messages:
+  - role: system
+    template: >
+      You are a B2B company intelligence analyst. Given data about a
+      company, produce a structured analysis of the company, its website,
+      industry, likely technology stack, market position, pain points, and
+      growth indicators. Only use information present in the provided
+      context -- never invent facts. Respond ONLY with a single valid JSON
+      object matching the requested schema, with no extra commentary.
+  - role: human
+    template: |
+      Company Name: {company_name}
+      Website: {website}
+      Industry (if known): {industry}
+      Employee Range (if known): {employees}
+      About Text: {about_text}
+      Website Content Excerpt: {website_content}
+
+      Return a JSON object with exactly these fields:
+      {{
+        "industry_analysis": "string or null",
+        "website_quality": "string or null - assessment of the site's professionalism/maturity",
+        "technology_signals": ["short strings describing technology/tooling signals you can see"],
+        "market_position": "string or null",
+        "pain_points": ["short strings - likely business pain points this company has"],
+        "growth_indicators": ["short strings - signals the company is growing"],
+        "icp_alignment_score": 0.0,
+        "reasoning": "1-3 sentences explaining your analysis",
+        "evidence": ["short direct quotes or facts from the context above that support your analysis"],
+        "confidence": 0.0
+      }}
+
+      Be conservative. If the context does not contain enough information
+      for a field, use null or an empty list rather than guessing.
