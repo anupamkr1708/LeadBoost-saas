@@ -1,0 +1,121 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 260 35% 4%;
+    --foreground: 260 15% 96%;
+    --card: 258 30% 7%;
+    --card-foreground: 260 15% 96%;
+    --popover: 258 32% 6%;
+    --popover-foreground: 260 15% 96%;
+    --secondary: 258 20% 12%;
+    --secondary-foreground: 260 15% 92%;
+    --muted: 258 20% 12%;
+    --border: 258 20% 18%;
+    --input: 258 20% 16%;
+    --ring: 258 90% 66%;
+    --radius: 0.875rem;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-canvas text-foreground antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  ::selection {
+    background: rgba(139, 92, 246, 0.35);
+    color: #fff;
+  }
+
+  /* Visible keyboard focus everywhere — never suppressed */
+  :focus-visible {
+    outline: 2px solid #A78BFA;
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.18);
+    background-clip: padding-box;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer components {
+  /* Glass morphism surface — the core card treatment used across the product */
+  .glass {
+    @apply relative rounded-2xl border border-glass-border bg-glass-surface shadow-glass backdrop-blur-xl;
+  }
+
+  .glass-strong {
+    @apply relative rounded-2xl border border-glass-border bg-white/[0.06] shadow-glass backdrop-blur-2xl;
+  }
+
+  .glass-hover {
+    @apply transition-all duration-300 hover:border-white/[0.16] hover:bg-white/[0.07] hover:shadow-elevated;
+  }
+
+  /* Ambient ombre background used on landing + app shell */
+  .ambient-bg {
+    @apply pointer-events-none fixed inset-0 -z-10 overflow-hidden bg-canvas;
+  }
+
+  .ambient-blob {
+    @apply absolute rounded-full blur-[110px] will-change-transform;
+  }
+
+  .grid-overlay {
+    @apply pointer-events-none absolute inset-0 bg-grid-texture opacity-[0.25];
+    background-size: 44px 44px;
+    mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, black 40%, transparent 100%);
+  }
+
+  .text-gradient {
+    @apply bg-gradient-to-r from-primary-400 via-fuchsia-400 to-accent bg-clip-text text-transparent;
+  }
+
+  .btn-glow {
+    box-shadow: 0 0 0 1px rgba(139, 92, 246, 0.4), 0 8px 30px -6px rgba(139, 92, 246, 0.55);
+  }
+
+  .scanline {
+    @apply absolute inset-y-0 left-0 w-1/3 bg-gradient-to-r from-transparent via-primary-400/60 to-transparent;
+  }
+
+  .kbd {
+    @apply inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded border border-white/10 bg-white/5 px-1 font-mono text-[10px] text-muted-foreground;
+  }
+}
