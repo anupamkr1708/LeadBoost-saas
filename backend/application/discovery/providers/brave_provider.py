@@ -11,16 +11,20 @@ If BRAVE_API_KEY is not configured, this provider is inert: it logs once
 and returns None for every call, which the caller (website_resolver)
 treats the same as "no candidate found" -- website resolution failure is
 a documented "continue" case, not a hard error.
+
+Note: as of this revision, DiscoveryService's *default* fallback provider
+is SerperWebsiteResolver (see serper_provider.py), not this one -- Brave's
+API now requires a card on file, whereas Serper offers a no-card free
+tier. This class is left fully intact and still usable (constructor
+-injectable into DiscoveryService) for anyone who does have a Brave key.
 """
 
 import os
 from typing import List, Optional
 
-import aiohttp
-
+from application.discovery.providers import http_utils
 from application.discovery.providers.base import WebsiteResolverProvider
 from application.discovery.website_validator import domain_of, is_rejected_domain
-from application.utils.retry import with_retry
 from core.infrastructure.logging import get_logger
 
 logger = get_logger("application.discovery.brave")
@@ -63,7 +67,17 @@ class BraveWebsiteResolver(WebsiteResolverProvider):
 
         query = f"{business_name} {location} official website"
         try:
-            results = await self._search_with_retry(query)
+            results = await self._search(query)
+        except http_utils.ProviderHTTPError as e:
+            logger.warning(
+                f"Brave search returned HTTP {e.status}",
+                extra={
+                    "event": "discovery_provider_http_error",
+                    "provider": self.name,
+                    "status": e.status,
+                },
+            )
+            return None
         except Exception as e:
             logger.warning(
                 f"Brave search failed: {e}",
@@ -87,20 +101,13 @@ class BraveWebsiteResolver(WebsiteResolverProvider):
 
         return None
 
-    @with_retry(exceptions=(aiohttp.ClientError, TimeoutError), attempts=2, min_wait=1.0, max_wait=4.0)
-    async def _search_with_retry(self, query: str) -> List[dict]:
+    async def _search(self, query: str) -> List[dict]:
         url = "https://api.search.brave.com/res/v1/web/search"
         headers = {
             "Accept": "application/json",
             "X-Subscription-Token": self.api_key,
         }
-        params = {"q": query, "count": 5}
-        async with aiohttp.ClientSession(
-            timeout=aiohttp.ClientTimeout(total=self.timeout)
-        ) as session:
-            async with session.get(url, headers=headers, params=params) as response:
-                if response.status != 200:
-                    raise aiohttp.ClientError(f"Brave Search returned HTTP {response.status}")
-                payload = await response.json(content_type=None)
-                web_results = (payload.get("web") or {}).get("results") or []
-                return web_results
+        payload = await http_utils.get_json(
+            url, headers=headers, params={"q": query, "count": 5}, timeout=self.timeout
+        )
+        return (payload.get("web") or {}).get("results") or []

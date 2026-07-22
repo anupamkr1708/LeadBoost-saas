@@ -1,0 +1,348 @@
+"""
+Tests for application.discovery.discovery_service.DiscoveryService.
+
+Every external call is mocked:
+  - the search provider (Overpass) is a stub returning fixed candidates
+  - the website validator is a stub
+  - application.workflows.lead_pipeline.run_lead_pipeline is monkeypatched
+    so no real scrape/LangGraph run happens -- this test is about
+    discovery orchestration, not the (already extensively tested)
+    pipeline itself.
+"""
+
+from typing import List, Optional
+
+import pytest
+
+from application.discovery.discovery_service import DiscoveryService
+from application.discovery.dto import BusinessCandidate
+from application.discovery.exceptions import ProviderError
+from application.discovery.providers.base import BusinessSearchProvider
+from application.discovery.website_validator import ValidationOutcome, WebsiteValidator
+from application.observability.repository import get_discovery_runs
+from core.infrastructure.database.crud import get_leads_by_organization
+
+
+class _StubSearchProvider(BusinessSearchProvider):
+    name = "stub_search"
+
+    def __init__(self, candidates: List[BusinessCandidate], raise_error: bool = False):
+        self._candidates = candidates
+        self._raise_error = raise_error
+
+    async def search(self, category, location, limit):
+        if self._raise_error:
+            raise ProviderError(self.name, "stub failure")
+        return self._candidates
+
+
+class _AllOkValidator(WebsiteValidator):
+    """Accepts any non-empty URL, normalizing exactly as given."""
+
+    async def validate(self, url):
+        if not url:
+            return ValidationOutcome(ok=False, reason="empty_url")
+        return ValidationOutcome(ok=True, normalized_url=url)
+
+
+class _StubFallback:
+    name = "brave"
+
+    def __init__(self, mapping: dict):
+        self._mapping = mapping  # business_name -> url or None
+
+    async def resolve_website(self, business_name, location):
+        return self._mapping.get(business_name)
+
+
+def _candidate(name, website=None, phone=None) -> BusinessCandidate:
+    return BusinessCandidate(name=name, website=website, phone=phone, category="shoe stores")
+
+
+async def _fake_run_lead_pipeline_success(lead_id: int):
+    return {"lead_id": lead_id, "status": "SUCCESS", "errors": []}
+
+
+async def _fake_run_lead_pipeline_mixed(lead_id: int):
+    # Even-numbered lead_ids "fail", odd ones succeed -- exercises batch
+    # isolation (one business's pipeline failing must not affect others).
+    if lead_id % 2 == 0:
+        raise RuntimeError(f"simulated pipeline crash for lead {lead_id}")
+    return {"lead_id": lead_id, "status": "SUCCESS", "errors": []}
+
+
+def _service(db_session, candidates, fallback_mapping=None, search_raises=False) -> DiscoveryService:
+    return DiscoveryService(
+        db=db_session,
+        search_provider=_StubSearchProvider(candidates, raise_error=search_raises),
+        resolver_fallback=_StubFallback(fallback_mapping or {}),
+        validator=_AllOkValidator(),
+    )
+
+
+async def test_creates_leads_for_validated_businesses(db_session, sample_org, sample_user, monkeypatch):
+    import application.discovery.discovery_service as svc_module
+
+    monkeypatch.setattr(svc_module, "run_lead_pipeline", _fake_run_lead_pipeline_success)
+
+    candidates = [
+        _candidate("Shoe World", website="https://shoeworld.example.com"),
+        _candidate("Foot Palace", website="https://footpalace.example.com"),
+    ]
+    service = _service(db_session, candidates)
+
+    result = await service.discover_and_create_leads(
+        query="Top shoe stores in Mumbai",
+        organization_id=sample_org.id,
+        owner_id=sample_user.id,
+    )
+
+    assert result.businesses_found == 2
+    validated = [b for b in result.businesses if b.status == "validated"]
+    assert len(validated) == 2
+    assert all(b.pipeline_status == "SUCCESS" for b in validated)
+    assert all(b.lead_id is not None for b in validated)
+
+    leads = get_leads_by_organization(db_session, sample_org.id)
+    assert len(leads) == 2
+
+
+async def test_never_fabricates_website_for_businesses_with_none_resolvable(
+    db_session, sample_org, sample_user, monkeypatch
+):
+    import application.discovery.discovery_service as svc_module
+
+    monkeypatch.setattr(svc_module, "run_lead_pipeline", _fake_run_lead_pipeline_success)
+
+    candidates = [_candidate("No Website Co", website=None)]
+    service = _service(db_session, candidates, fallback_mapping={})  # Brave finds nothing either
+
+    result = await service.discover_and_create_leads(
+        query="Dentists in Pune", organization_id=sample_org.id, owner_id=sample_user.id
+    )
+
+    assert len(result.businesses) == 1
+    outcome = result.businesses[0]
+    assert outcome.status == "no_website"
+    assert outcome.website is None
+    assert outcome.lead_id is None
+
+
+async def test_brave_fallback_resolves_missing_website(db_session, sample_org, sample_user, monkeypatch):
+    import application.discovery.discovery_service as svc_module
+
+    monkeypatch.setattr(svc_module, "run_lead_pipeline", _fake_run_lead_pipeline_success)
+
+    candidates = [_candidate("Fallback Co", website=None)]
+    service = _service(
+        db_session, candidates, fallback_mapping={"Fallback Co": "https://fallbackco.example.com"}
+    )
+
+    result = await service.discover_and_create_leads(
+        query="Hotels in Goa", organization_id=sample_org.id, owner_id=sample_user.id
+    )
+
+    outcome = result.businesses[0]
+    assert outcome.status == "validated"
+    assert outcome.website == "https://fallbackco.example.com"
+
+
+async def test_duplicate_businesses_in_same_batch_are_not_both_created(
+    db_session, sample_org, sample_user, monkeypatch
+):
+    import application.discovery.discovery_service as svc_module
+
+    monkeypatch.setattr(svc_module, "run_lead_pipeline", _fake_run_lead_pipeline_success)
+
+    candidates = [
+        _candidate("Nike Store", website="https://www.nike.com"),
+        _candidate("Nike Store Branch 2", website="https://nike.com/branch2"),
+    ]
+    service = _service(db_session, candidates)
+
+    result = await service.discover_and_create_leads(
+        query="Top shoe stores in Mumbai", organization_id=sample_org.id, owner_id=sample_user.id
+    )
+
+    statuses = sorted(b.status for b in result.businesses)
+    assert statuses == ["duplicate", "validated"]
+
+    leads = get_leads_by_organization(db_session, sample_org.id)
+    assert len(leads) == 1
+
+
+async def test_existing_lead_in_db_is_reported_as_duplicate_not_recreated(
+    db_session, sample_org, sample_user, monkeypatch
+):
+    import application.discovery.discovery_service as svc_module
+    from core.domain.schemas.lead import LeadCreate
+    from core.infrastructure.database.crud import create_lead
+
+    monkeypatch.setattr(svc_module, "run_lead_pipeline", _fake_run_lead_pipeline_success)
+
+    existing = create_lead(
+        db_session,
+        LeadCreate(
+            website="https://existing.example.com",
+            organization_id=sample_org.id,
+            owner_id=sample_user.id,
+        ),
+    )
+
+    candidates = [_candidate("Existing Biz", website="https://existing.example.com")]
+    service = _service(db_session, candidates)
+
+    result = await service.discover_and_create_leads(
+        query="Restaurants in Jaipur", organization_id=sample_org.id, owner_id=sample_user.id
+    )
+
+    outcome = result.businesses[0]
+    assert outcome.status == "duplicate"
+    assert outcome.lead_id == existing.id
+
+    leads = get_leads_by_organization(db_session, sample_org.id)
+    assert len(leads) == 1  # no new lead created
+
+
+async def test_search_provider_failure_degrades_gracefully(db_session, sample_org, sample_user):
+    service = _service(db_session, candidates=[], search_raises=True)
+
+    result = await service.discover_and_create_leads(
+        query="Accounting firms in Chennai", organization_id=sample_org.id, owner_id=sample_user.id
+    )
+
+    assert result.businesses_found == 0
+    assert result.businesses == []  # no exception propagated to the caller
+
+
+async def test_response_respects_requested_limit_even_with_more_candidates(
+    db_session, sample_org, sample_user, monkeypatch
+):
+    """Regression test for a real-world bug: the `businesses` array used
+    to include every over-fetched raw candidate (the search provider is
+    intentionally asked for more than `limit` to give ranking/dedup a
+    larger pool), so requesting limit=2 could return far more than 2
+    entries. The itemized response must never exceed `requested_limit`."""
+    import application.discovery.discovery_service as svc_module
+
+    monkeypatch.setattr(svc_module, "run_lead_pipeline", _fake_run_lead_pipeline_success)
+
+    candidates = [
+        _candidate(f"Business {i}", website=f"https://business{i}.example.com") for i in range(5)
+    ]
+    service = _service(db_session, candidates)
+
+    result = await service.discover_and_create_leads(
+        query="Real estate agencies in Bangalore",
+        organization_id=sample_org.id,
+        owner_id=sample_user.id,
+        limit=2,
+    )
+
+    assert result.businesses_found == 5  # true total is still reported
+    assert len(result.businesses) == 2  # but the itemized list respects the limit
+    assert all(b.status == "validated" for b in result.businesses)
+
+
+async def test_rejected_businesses_fill_remaining_slots_up_to_limit(
+    db_session, sample_org, sample_user, monkeypatch
+):
+    """When there aren't enough validated businesses to fill the limit,
+    rejected/no-website businesses fill the remaining slots (for
+    diagnostic value) -- but the total still never exceeds the limit,
+    even when far more candidates than the limit were found (the bug
+    scenario from real-world testing: many no-website results)."""
+    import application.discovery.discovery_service as svc_module
+
+    monkeypatch.setattr(svc_module, "run_lead_pipeline", _fake_run_lead_pipeline_success)
+
+    candidates = [_candidate("Has Website", website="https://haswebsite.example.com")]
+    candidates += [_candidate(f"No Website {i}", website=None) for i in range(10)]
+    service = _service(db_session, candidates, fallback_mapping={})  # fallback resolves nothing
+
+    result = await service.discover_and_create_leads(
+        query="Dentists in Pune",
+        organization_id=sample_org.id,
+        owner_id=sample_user.id,
+        limit=3,
+    )
+
+    assert result.businesses_found == 11
+    assert len(result.businesses) == 3  # capped at the limit, not all 11
+    statuses = [b.status for b in result.businesses]
+    assert statuses.count("validated") == 1
+    assert statuses.count("no_website") == 2
+
+
+async def test_one_pipeline_failure_does_not_stop_remaining_businesses(
+    db_session, sample_org, sample_user, monkeypatch
+):
+    import application.discovery.discovery_service as svc_module
+
+    monkeypatch.setattr(svc_module, "run_lead_pipeline", _fake_run_lead_pipeline_mixed)
+
+    candidates = [
+        _candidate(f"Business {i}", website=f"https://business{i}.example.com") for i in range(4)
+    ]
+    service = _service(db_session, candidates)
+
+    result = await service.discover_and_create_leads(
+        query="Top 4 hotels in Goa", organization_id=sample_org.id, owner_id=sample_user.id
+    )
+
+    # All 4 businesses still get a Lead created and an outcome reported,
+    # even though ~half their pipeline runs "crashed".
+    assert len(result.businesses) == 4
+    assert all(b.status == "validated" for b in result.businesses)
+    failed = [b for b in result.businesses if b.pipeline_status == "FAILED"]
+    succeeded = [b for b in result.businesses if b.pipeline_status == "SUCCESS"]
+    assert len(failed) > 0
+    assert len(succeeded) > 0
+
+
+async def test_discovery_run_is_persisted_for_metrics(db_session, sample_org, sample_user, monkeypatch):
+    import application.discovery.discovery_service as svc_module
+
+    monkeypatch.setattr(svc_module, "run_lead_pipeline", _fake_run_lead_pipeline_success)
+
+    candidates = [_candidate("Shoe World", website="https://shoeworld.example.com")]
+    service = _service(db_session, candidates)
+
+    await service.discover_and_create_leads(
+        query="Top shoe stores in Mumbai", organization_id=sample_org.id, owner_id=sample_user.id
+    )
+
+    records = get_discovery_runs(db_session, organization_id=sample_org.id)
+    assert len(records) == 1
+    assert records[0].businesses_returned == 1
+    assert records[0].validated_leads == 1
+    assert records[0].query == "Top shoe stores in Mumbai"
+
+
+async def test_invalid_query_raises_query_parse_error(db_session, sample_org, sample_user):
+    service = _service(db_session, candidates=[])
+    from application.discovery.exceptions import QueryParseError
+
+    with pytest.raises(QueryParseError):
+        await service.discover_and_create_leads(
+            query="not a valid shape",
+            organization_id=sample_org.id,
+            owner_id=sample_user.id,
+        )
+
+
+def test_default_fallback_provider_is_serper_not_brave(db_session):
+    """Brave now requires a card on file; Serper (free tier, no card) is
+    the default. Anyone who still wants Brave can inject it explicitly --
+    the provider abstraction itself didn't change."""
+    from application.discovery.providers.serper_provider import SerperWebsiteResolver
+
+    service = DiscoveryService(db_session)
+    assert isinstance(service.resolver_fallback, SerperWebsiteResolver)
+
+
+def test_brave_still_injectable_explicitly(db_session):
+    from application.discovery.providers.brave_provider import BraveWebsiteResolver
+
+    service = DiscoveryService(db_session, resolver_fallback=BraveWebsiteResolver())
+    assert isinstance(service.resolver_fallback, BraveWebsiteResolver)

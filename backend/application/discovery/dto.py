@@ -64,14 +64,22 @@ class LeadCreationOutcome(BaseModel):
 
     name: str
     website: Optional[str] = None
-    status: str  # "validated" | "no_website" | "duplicate" | "validation_failed" | "quota_exceeded" | "pipeline_error" | "not_selected"
+    status: str  # "validated" | "no_website" | "duplicate" | "validation_failed" | "quota_exceeded" | "pipeline_error"
     lead_id: Optional[int] = None
     pipeline_status: Optional[str] = None  # SUCCESS | PARTIAL_SUCCESS | FAILED
     reason: Optional[str] = None
 
 
 class DiscoveryResponse(BaseModel):
-    """Top-level response of DiscoveryService.discover_and_create_leads()."""
+    """Top-level response of DiscoveryService.discover_and_create_leads().
+
+    `businesses_found` is the true total number of candidates the search
+    provider returned. `businesses` is capped at `requested_limit` entries
+    (validated leads first, then rejected/no-website businesses filling
+    any remaining slots for diagnostic value) -- it will not necessarily
+    equal `businesses_found` when more candidates were found than asked
+    for.
+    """
 
     query: str
     category: str

@@ -4,7 +4,7 @@ Discovery Service.
 Orchestrates the full, deterministic discovery pipeline:
 
     parse -> search (Overpass) -> resolve+validate website
-    (Overpass website, else Brave fallback) -> duplicate detection
+    (Overpass website, else Serper fallback) -> duplicate detection
     -> ranking -> Lead creation -> existing LeadPipeline.execute()
 
 This is the *only* module that talks to the database and to
@@ -17,6 +17,14 @@ No LLM call happens anywhere in this file or anything it calls before a
 Lead is hantded to LeadPipeline.execute() -- from that point on, the
 existing, unmodified pipeline (and its own AI-feature gating) takes over
 exactly as it does for manually-created leads.
+
+The default website-resolution fallback provider is SerperWebsiteResolver
+(application.discovery.providers.serper_provider) -- Brave's API now
+requires a card on file, whereas Serper offers a free tier with no card
+required. BraveWebsiteResolver is untouched and still fully usable by
+constructor-injecting it as `resolver_fallback` if you have a Brave key.
+Nothing else about provider selection changed: this remains the only
+dependency-injection point, exactly as before.
 """
 
 import asyncio
@@ -37,8 +45,8 @@ from application.discovery.dto import (
 from application.discovery.duplicate_detector import DuplicateDetector
 from application.discovery.exceptions import ProviderError, QueryParseError
 from application.discovery.providers.base import BusinessSearchProvider, WebsiteResolverProvider
-from application.discovery.providers.brave_provider import BraveWebsiteResolver
 from application.discovery.providers.overpass_provider import OverpassProvider
+from application.discovery.providers.serper_provider import SerperWebsiteResolver
 from application.discovery.query_parser import QueryParser
 from application.discovery.ranking import rank_businesses
 from application.discovery.website_resolver import WebsiteResolver
@@ -67,7 +75,7 @@ class DiscoveryService:
         self.search_provider = search_provider or OverpassProvider()
         self.validator = validator or WebsiteValidator()
         self.resolver_fallback = (
-            resolver_fallback if resolver_fallback is not None else BraveWebsiteResolver()
+            resolver_fallback if resolver_fallback is not None else SerperWebsiteResolver()
         )
         self.resolver = WebsiteResolver(self.validator, self.resolver_fallback)
         self.max_concurrent_pipelines = max(
@@ -113,11 +121,19 @@ class DiscoveryService:
         ):
             ranked = rank_businesses(eligible, parsed.category, parsed.location)
         selected = ranked[: parsed.limit]
-        overflow = ranked[parsed.limit :]
 
         outcomes = await self._create_leads_and_run_pipelines(selected, organization_id, owner_id)
-        outcomes.extend(self._rejected_outcomes(rejected))
-        outcomes.extend(self._overflow_outcomes(overflow))
+
+        # `outcomes` already has at most `parsed.limit` entries here (one
+        # per business in `selected`). Fill any remaining response slots
+        # with rejected/no-website businesses for diagnostic value (e.g.
+        # "why did I only get 3 of the 15 shoe stores you found?"), but
+        # never exceed the requested limit -- businesses beyond the limit,
+        # ranked-but-not-selected or rejected alike, are intentionally NOT
+        # itemized; `businesses_found` already reports the true total.
+        remaining_slots = max(0, parsed.limit - len(outcomes))
+        if remaining_slots > 0:
+            outcomes.extend(self._rejected_outcomes(rejected)[:remaining_slots])
 
         duration_ms = int((time.time() - start) * 1000)
         validated_count = sum(1 for o in outcomes if o.status == "validated")
@@ -341,18 +357,6 @@ class DiscoveryService:
                 )
             )
         return outcomes
-
-    @staticmethod
-    def _overflow_outcomes(overflow: List[DiscoveredBusiness]) -> List[LeadCreationOutcome]:
-        return [
-            LeadCreationOutcome(
-                name=business.candidate.name,
-                website=business.resolution.website,
-                status="not_selected",
-                reason="Ranked below the requested limit",
-            )
-            for business in overflow
-        ]
 
     # -- Metrics (extends the existing observability/analytics module) --
 

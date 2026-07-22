@@ -61,7 +61,12 @@ async def search_businesses(
             limit=request.limit,
         )
     except QueryParseError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        # 422, not 400: this matches the status FastAPI's own Pydantic
+        # validation already returns for e.g. a too-short query
+        # (min_length=3) -- both are "syntactically fine as JSON, but the
+        # query content itself can't be processed" errors, so they should
+        # look the same to a client.
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
     except Exception as e:
         logger.error(f"Discovery search failed: {e}", exc_info=True)
         raise HTTPException(
