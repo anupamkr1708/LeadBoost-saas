@@ -64,7 +64,7 @@ class LeadCreationOutcome(BaseModel):
 
     name: str
     website: Optional[str] = None
-    status: str  # "validated" | "no_website" | "duplicate" | "validation_failed" | "quota_exceeded" | "pipeline_error"
+    status: str  # "validated" | "not_selected" | "no_website" | "duplicate" | "validation_failed" | "quota_exceeded" | "pipeline_error"
     lead_id: Optional[int] = None
     pipeline_status: Optional[str] = None  # SUCCESS | PARTIAL_SUCCESS | FAILED
     reason: Optional[str] = None
@@ -74,11 +74,24 @@ class DiscoveryResponse(BaseModel):
     """Top-level response of DiscoveryService.discover_and_create_leads().
 
     `businesses_found` is the true total number of candidates the search
-    provider returned. `businesses` is capped at `requested_limit` entries
-    (validated leads first, then rejected/no-website businesses filling
-    any remaining slots for diagnostic value) -- it will not necessarily
-    equal `businesses_found` when more candidates were found than asked
-    for.
+    provider returned. `businesses` reports the outcome of every one of
+    them -- it is NOT capped at `requested_limit`:
+
+      - the top `requested_limit` validated businesses (by rank) get a
+        Lead created and run through the full pipeline: status
+        "validated" (or "quota_exceeded"/"pipeline_error"/"duplicate" if
+        Lead creation itself couldn't proceed).
+      - validated businesses beyond the limit are reported with status
+        "not_selected" -- found and confirmed real, just not among the
+        top `requested_limit` by rank. No Lead is created for these (no
+        pipeline cost is spent on results that weren't asked for).
+      - businesses that never validated get "no_website" or
+        "validation_failed", with `reason` explaining why.
+
+    This full accounting is what lets a response like "found 15 shoe
+    stores, here are the 3 that were selected" also show *why* the other
+    12 weren't -- duplicates, unreachable sites, or simply ranked lower
+    than the requested limit -- instead of silently discarding them.
     """
 
     query: str

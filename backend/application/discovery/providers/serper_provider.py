@@ -16,15 +16,42 @@ If SERPER_API_KEY is not configured, this provider is inert: it logs once
 and returns None for every call -- byte-for-byte the same
 "fail gracefully, never crash Discovery" behavior BraveWebsiteResolver
 already had.
+
+Grounding
+---------
+Result scoring is built on application.discovery.grounding, not naive
+substring matching. Naive matching (checking whether any word of the
+business name appears anywhere inside the domain, or vice versa) is what
+previously let a Mumbai shoe store named "Regal" resolve to
+regmovies.com (an unrelated US cinema chain -- "regal" doesn't even
+appear as a substring of "regmovies", it was the generic "https + root
+path" quality score alone that cleared the old, too-low acceptance bar)
+and let "Hollywood Walk of Shame" resolve to walkoffame.com. Two changes
+fix this:
+
+  1. Brand relevance is now a *gate*, not just an additive bonus: a result
+     is only scored at all if grounding.brand_match_strength finds a real
+     brand/domain relationship, or the business name literally appears in
+     the result title. Generic page-quality signals (https, root domain)
+     are no longer, by themselves, enough to pass.
+  2. A generic/low-signal business name (grounding.is_low_signal_business_name
+     -- e.g. a name pattern like "<Person> Hospital" that repeats near-
+     identically across many cities) additionally requires the location to
+     be corroborated somewhere in the result (title/snippet/URL) before
+     being trusted -- brand match alone can't tell "this city's branch"
+     apart from a same-named business elsewhere.
 """
 
 import os
+import re
 import time
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
+from application.discovery import grounding
 from application.discovery.providers import http_utils
-from application.discovery.providers.base import WebsiteResolverProvider
+from application.discovery.providers.base import BusinessSearchProvider, WebsiteResolverProvider
+from application.discovery.dto import BusinessCandidate
 from application.discovery.website_validator import domain_of, is_rejected_domain
 from core.infrastructure.logging import get_logger
 
@@ -43,6 +70,26 @@ _SERPER_EXTRA_REJECTED_DOMAINS = (
     "github.com",
 )
 
+# Aggregator/listicle/review sites that legitimately rank a real page for
+# almost any business+location query, but are never *the business's own*
+# site -- relevant only to SerperBusinessSearchProvider's category-level
+# search (below), where there's no specific business name yet to score
+# against, so _is_acceptable_result's generic checks wouldn't catch them.
+_AGGREGATOR_DOMAINS = (
+    "clutch.co",
+    "g2.com",
+    "capterra.com",
+    "builtin.com",
+    "crunchbase.com",
+    "glassdoor.com",
+    "goodfirms.co",
+    "designrush.com",
+    "themanifest.com",
+    "indeed.com",
+    "angel.co",
+    "wellfound.com",
+)
+
 # Path/filename patterns that mark a result as an article/asset rather
 # than a business's site itself (forums, blogs, news, PDFs). Substring
 # checks on the lowercased path are enough here -- this is a coarse
@@ -58,7 +105,22 @@ _REJECTED_PATH_SUBSTRINGS = (
 )
 _REJECTED_EXTENSIONS = (".pdf", ".doc", ".docx")
 
-_MIN_ACCEPTABLE_SCORE = 10.0
+_MIN_ACCEPTABLE_SCORE = 15.0
+
+# Minimum brand_match_strength to treat a result as "the business's own
+# domain" without needing the name to also appear in the title verbatim.
+_BRAND_GATE_THRESHOLD = 0.55
+# Above this, a low-signal name is trusted without corroborating location
+# text -- an (almost) exact brand/domain match is strong enough evidence
+# on its own even for a generic name.
+_LOW_SIGNAL_BRAND_OVERRIDE = 0.95
+
+# Title patterns that mark a listicle/directory-style result ("Top 10 X in
+# Y", "Best AI startups in Noida") rather than one specific company's own
+# page -- only relevant to the category-level business search below.
+_LISTICLE_TITLE_PATTERN = re.compile(
+    r"\btop\s+\d+\b|\bbest\s+\d+\b|\b\d+\s+best\b", re.IGNORECASE
+)
 
 
 def _is_acceptable_result(url: str) -> bool:
@@ -78,15 +140,52 @@ def _is_acceptable_result(url: str) -> bool:
     return True
 
 
-def _score_result(result: Dict[str, Any], business_name: str, position: int) -> Optional[float]:
+def _score_result(
+    result: Dict[str, Any], business_name: str, position: int, location: str = ""
+) -> Optional[float]:
     """Deterministic scoring for one organic result. Returns None if the
     result should be rejected outright; otherwise a non-negative score
-    where higher is a more likely official site."""
+    where higher is a more likely official site.
+
+    Two grounding gates run *before* any score is computed -- generic
+    page-quality signals (https, root domain) are never, by themselves,
+    enough to accept a result:
+
+      1. There must be real evidence connecting this domain/page to the
+         actual business: either grounding.brand_match_strength finds a
+         genuine brand/domain relationship, or the business name appears
+         verbatim in the result title. Without either, the result is
+         rejected outright regardless of how "clean" the URL looks.
+      2. If the business name is low-signal/generic (a pattern that
+         repeats near-identically across many cities, e.g. "<Person>
+         Hospital"), the location must additionally be corroborated
+         somewhere in the result -- unless the brand match is strong
+         enough to stand on its own.
+    """
     url = result.get("link")
     if not url:
         return None
     if not _is_acceptable_result(url):
         return None
+
+    domain = domain_of(url)
+    title = result.get("title") or ""
+    snippet = result.get("snippet") or ""
+
+    brand_strength = grounding.brand_match_strength(business_name, domain)
+    title_has_name = bool(business_name) and business_name.lower() in title.lower()
+
+    if brand_strength < _BRAND_GATE_THRESHOLD and not title_has_name:
+        return None
+
+    if grounding.is_low_signal_business_name(business_name) and brand_strength < _LOW_SIGNAL_BRAND_OVERRIDE:
+        location_evidence = (
+            grounding.location_mentioned(title, location)
+            or grounding.location_mentioned(snippet, location)
+            or grounding.location_mentioned(url, location)
+        )
+        if not location_evidence:
+            return None
 
     parsed = urlparse(url)
     score = 0.0
@@ -101,18 +200,17 @@ def _score_result(result: Dict[str, Any], business_name: str, position: int) -> 
     else:
         score += 5.0
 
-    domain = domain_of(url)
-    domain_root = domain.split(".")[0] if domain else ""
-    name_words = [w.lower() for w in business_name.split() if len(w) > 2]
-    if name_words and domain_root:
-        if any(word == domain_root for word in name_words):
-            score += 25.0  # exact brand match, e.g. "nike" == "nike.com"
-        elif any(word in domain_root or domain_root in word for word in name_words):
-            score += 12.0  # partial brand match
+    # Continuous brand-match contribution replaces the old binary
+    # exact/partial (25/12) bump -- a real fuzzy match (e.g. "Metro
+    # Shoes" -> metroshoes.com) is rewarded proportionally rather than as
+    # an all-or-nothing substring check.
+    score += brand_strength * 25.0
 
-    title = (result.get("title") or "").lower()
-    if business_name.lower() in title:
+    if title_has_name:
         score += 8.0
+
+    if grounding.location_mentioned(title, location) or grounding.location_mentioned(snippet, location):
+        score += 10.0  # corroborating location signal, when available
 
     # Small, capped boost for ranking higher in Serper's own results --
     # a tiebreaker, not the primary signal.
@@ -177,7 +275,7 @@ class SerperWebsiteResolver(WebsiteResolverProvider):
 
         best_url, best_score = None, 0.0
         for position, result in enumerate(top_results):
-            score = _score_result(result, business_name, position)
+            score = _score_result(result, business_name, position, location)
             if score is not None and score > best_score and score >= _MIN_ACCEPTABLE_SCORE:
                 best_score, best_url = score, result.get("link")
 
@@ -235,3 +333,128 @@ class SerperWebsiteResolver(WebsiteResolverProvider):
             _SERPER_SEARCH_URL, headers=headers, json_body={"q": query}, timeout=self.timeout
         )
         return payload.get("organic") or []
+
+
+def _looks_like_listicle(title: str) -> bool:
+    """True for directory/roundup-style titles ("Top 10 AI Startups in
+    Noida", "15 Best SaaS Companies") -- these are a real, reachable page,
+    just an aggregator's article about many companies, not one company's
+    own site."""
+    return bool(_LISTICLE_TITLE_PATTERN.search(title or ""))
+
+
+def _derive_business_name(title: str, domain: str) -> str:
+    """Best-effort business name for a candidate whose only source is a
+    web-search result, not a structured business listing. Prefers the
+    lead segment of the page title (before a separator like '|' or '-',
+    the common "Brand | Tagline" pattern); falls back to a titleized
+    domain root so a name is never left empty."""
+    if title:
+        primary = re.split(r"\s+[|\-\u2013\u2014:]\s+", title, maxsplit=1)[0].strip()
+        if primary and 1 < len(primary) <= 60:
+            return primary
+    root = grounding.domain_root(domain)
+    return root.replace("-", " ").replace("_", " ").title() if root else domain
+
+
+class SerperBusinessSearchProvider(BusinessSearchProvider):
+    """Fallback business-discovery source, used ONLY when Overpass (OSM)
+    returns zero results for a category that typically has no physical,
+    map-able presence -- SaaS, startups, software/IT/AI companies, and
+    similar (see DiscoveryService._is_startup_like_category, the single
+    place that decides when this fires). Overpass remains the primary
+    source and is always tried first; this never replaces it.
+
+    Unlike SerperWebsiteResolver (which resolves *one already-known*
+    business's website), this searches the category+location query itself
+    and treats each acceptable organic result as a distinct company's own
+    site -- there is no per-business name to score against yet, so
+    filtering here leans on domain/path rejection (directories,
+    aggregators, listicle titles) rather than grounding.brand_match_strength.
+    Each resulting BusinessCandidate carries its website directly (the
+    result *is* the candidate's site), so it flows through the existing,
+    unmodified resolve/validate/dedupe/rank pipeline exactly like an
+    Overpass candidate with a `website` tag already set -- no special-
+    casing needed downstream.
+    """
+
+    name = "serper_business_search"
+
+    def __init__(self, api_key: Optional[str] = None, timeout: int = 10):
+        self.api_key = api_key if api_key is not None else os.getenv("SERPER_API_KEY")
+        self.timeout = timeout
+        self._warned_missing_key = False
+
+    def is_configured(self) -> bool:
+        return bool(self.api_key)
+
+    async def search(self, category: str, location: str, limit: int) -> List[BusinessCandidate]:
+        if not self.is_configured():
+            if not self._warned_missing_key:
+                logger.info(
+                    "SERPER_API_KEY not configured; startup-category search fallback is disabled",
+                    extra={"event": "discovery_provider_unconfigured", "provider": self.name},
+                )
+                self._warned_missing_key = True
+            return []
+
+        query = f"{category} in {location}" if location else category
+        try:
+            organic_results = await http_utils.post_json(
+                _SERPER_SEARCH_URL,
+                headers={"X-API-KEY": self.api_key, "Content-Type": "application/json"},
+                json_body={"q": query, "num": max(limit * 2, 10)},
+                timeout=self.timeout,
+            )
+        except Exception as e:
+            logger.warning(
+                f"Serper business search failed: {e}",
+                extra={"event": "discovery_provider_error", "provider": self.name, "query": query},
+            )
+            return []
+
+        organic = organic_results.get("organic") or []
+        candidates: List[BusinessCandidate] = []
+        seen_domains = set()
+
+        for result in organic:
+            url = result.get("link")
+            title = result.get("title") or ""
+            if not url or not _is_acceptable_result(url):
+                continue
+            if _looks_like_listicle(title):
+                continue
+            domain = domain_of(url)
+            if not domain or any(agg in domain for agg in _AGGREGATOR_DOMAINS):
+                continue
+            if domain in seen_domains:
+                continue
+            seen_domains.add(domain)
+
+            candidates.append(
+                BusinessCandidate(
+                    name=_derive_business_name(title, domain),
+                    category=category,
+                    address=None,
+                    phone=None,
+                    website=url,
+                    rating=None,
+                    review_count=None,
+                    source=self.name,
+                )
+            )
+            if len(candidates) >= limit:
+                break
+
+        logger.info(
+            "Serper business-search fallback completed",
+            extra={
+                "event": "discovery_provider_search",
+                "provider": self.name,
+                "category": category,
+                "location": location,
+                "results_returned": len(organic),
+                "candidates_built": len(candidates),
+            },
+        )
+        return candidates

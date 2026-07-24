@@ -70,3 +70,49 @@ def test_extra_whitespace_is_normalized(parser):
 def test_leading_article_is_stripped(parser):
     result = parser.parse("The dentists in Pune")
     assert result.category == "dentists"
+
+
+# -- Generalized limit extraction ("best N" / bare N, not just "top N") ------
+
+
+def test_best_n_qualifier_extracts_limit(parser):
+    result = parser.parse("Find me the best 10 gyms in Delhi")
+    assert result.category == "gyms"
+    assert result.location == "Delhi"
+    assert result.limit == 10
+
+
+def test_bare_number_qualifier_extracts_limit(parser):
+    result = parser.parse("10 gyms in Delhi")
+    assert result.category == "gyms"
+    assert result.limit == 10
+
+
+def test_ai_automation_startups_no_preposition(parser):
+    """Regression test: this exact query 422'd in production because of a
+    module-naming bug in the location gazetteer import, not a parser gap
+    -- this test pins the correct behavior now that it's fixed."""
+    result = parser.parse("Ai Automation startups noida")
+    assert result.category == "Ai Automation startups"
+    assert result.location == "noida"
+
+
+# -- Placeholder-location rejection ("near me" isn't a real place) ----------
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "coffee shops near me",
+        "restaurants close to me",
+        "dentists around me",
+        "gyms in my area",
+    ],
+)
+def test_placeholder_location_is_rejected_not_hallucinated(parser, query):
+    """'me' / 'my area' must never be silently treated as a place name --
+    that would either search for a literal (nonexistent) location called
+    'me', or worse, return ungrounded results. A clear error is correct
+    here, not a guess."""
+    with pytest.raises(QueryParseError):
+        parser.parse(query)

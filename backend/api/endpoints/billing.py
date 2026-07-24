@@ -3,6 +3,7 @@ Billing endpoints
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 
@@ -40,20 +41,38 @@ async def upgrade_plan(
     db: Session = Depends(get_db),
 ):
     """
-    Upgrade the organization's subscription plan
+    Online payments are not live yet, so this endpoint intentionally does
+    NOT change the organization's plan. Stripe isn't wired up (see
+    core.infrastructure.billing.stripe_service -- it exists but has no
+    webhook endpoint registered), so accepting a plan_name here and
+    calling assign_plan_to_organization directly would let any
+    authenticated user unlock Pro/Enterprise limits and AI/export
+    features for free, with no payment ever taking place, just by
+    calling this endpoint (or changing frontend state). A real upgrade
+    will happen through a verified Stripe Checkout + webhook flow once
+    that's wired up; assign_plan_to_organization should only ever be
+    called from there (or from signup, for the default free plan).
     """
-    subscription_service = SubscriptionService(db)
-    success = subscription_service.assign_plan_to_organization(
-        current_user.organization_id, plan_name
-    )
-
-    if not success:
+    valid_plans = {"free", "pro", "enterprise"}
+    if plan_name not in valid_plans:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid plan name: {plan_name}",
         )
 
-    return {"message": f"Subscription upgraded to {plan_name} successfully"}
+    logger.info(
+        f"Upgrade requested but not activated (online payments not live): "
+        f"organization_id={current_user.organization_id} plan={plan_name}"
+    )
+
+    return JSONResponse(
+        status_code=status.HTTP_402_PAYMENT_REQUIRED,
+        content={
+            "message": "Online payments coming soon.",
+            "activated": False,
+            "requested_plan": plan_name,
+        },
+    )
 
 
 @router.get("/plans")

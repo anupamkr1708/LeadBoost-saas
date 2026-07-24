@@ -27,8 +27,7 @@ class SubscriptionService:
             .first()
         )
 
-        # Determine plan name from subscription or default to 'free'
-        plan_name = subscription.plan_name if subscription else "free"
+        plan_name = self._effective_plan_name(subscription)
 
         # Get plan limits from environment variables based on plan name
         if plan_name == "pro":
@@ -40,7 +39,7 @@ class SubscriptionService:
             can_export = os.getenv("CAN_EXPORT_ENTERPRISE", "false").lower() == "true"
             can_use_ai = os.getenv("CAN_USE_AI_ENTERPRISE", "false").lower() == "true"
         else:  # free plan
-            max_leads_per_day = int(os.getenv("FREE_MAX_LEADS_PER_DAY", "10"))
+            max_leads_per_day = int(os.getenv("FREE_MAX_LEADS_PER_DAY", "50"))
             can_export = os.getenv("CAN_EXPORT_FREE", "false").lower() == "true"
             can_use_ai = os.getenv("CAN_USE_AI_FREE", "false").lower() == "true"
 
@@ -57,6 +56,25 @@ class SubscriptionService:
             remaining_daily_leads=remaining_daily_leads,
             can_process_more_today=can_process_more_today,
         )
+
+    @staticmethod
+    def _effective_plan_name(subscription: Optional[Subscription]) -> str:
+        """The plan name to actually apply limits/features for.
+
+        A subscription whose status is "canceled" no longer represents an
+        active paid plan -- without this check, an organization would keep
+        its Pro/Enterprise daily-lead limit and AI/export access forever
+        after cancel_subscription(immediate=True), since only `status`
+        changes on cancellation, not `plan_name`. Falling back to "free"
+        here (rather than mutating plan_name on cancel) keeps the history
+        of what plan they were on intact for billing/support purposes
+        while still enforcing the correct limits going forward.
+        """
+        if subscription is None:
+            return "free"
+        if subscription.status == "canceled":
+            return "free"
+        return subscription.plan_name or "free"
 
     def _get_daily_usage(self, organization_id: int) -> int:
         """Get the number of leads created today for an organization"""
@@ -91,7 +109,7 @@ class SubscriptionService:
             .first()
         )
 
-        plan_name = subscription.plan_name if subscription else "free"
+        plan_name = self._effective_plan_name(subscription)
 
         if plan_name == "pro":
             return os.getenv("CAN_USE_AI_PRO", "false").lower() == "true"
@@ -108,7 +126,7 @@ class SubscriptionService:
             .first()
         )
 
-        plan_name = subscription.plan_name if subscription else "free"
+        plan_name = self._effective_plan_name(subscription)
 
         if plan_name == "pro":
             return os.getenv("CAN_EXPORT_PRO", "false").lower() == "true"
@@ -128,7 +146,7 @@ class SubscriptionService:
         plans_data = [
             {
                 "name": "free",
-                "max_leads_per_day": int(os.getenv("FREE_MAX_LEADS_PER_DAY", "10")),
+                "max_leads_per_day": int(os.getenv("FREE_MAX_LEADS_PER_DAY", "50")),
                 "can_export": os.getenv("CAN_EXPORT_FREE", "false").lower() == "true",
                 "can_use_ai": os.getenv("CAN_USE_AI_FREE", "false").lower() == "true",
             },

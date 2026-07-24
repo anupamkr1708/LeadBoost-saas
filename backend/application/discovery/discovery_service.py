@@ -3,9 +3,10 @@ Discovery Service.
 
 Orchestrates the full, deterministic discovery pipeline:
 
-    parse -> search (Overpass) -> resolve+validate website
-    (Overpass website, else Serper fallback) -> duplicate detection
-    -> ranking -> Lead creation -> existing LeadPipeline.execute()
+    parse -> search (Overpass, general web-search fallback if that finds
+    nothing) -> resolve+validate website (Overpass website, else Serper
+    fallback) -> duplicate detection -> ranking -> Lead creation ->
+    existing LeadPipeline.execute()
 
 This is the *only* module that talks to the database and to
 application.workflows.lead_pipeline -- every other discovery module
@@ -25,6 +26,19 @@ required. BraveWebsiteResolver is untouched and still fully usable by
 constructor-injecting it as `resolver_fallback` if you have a Brave key.
 Nothing else about provider selection changed: this remains the only
 dependency-injection point, exactly as before.
+
+Business-search fallback: Overpass (OpenStreetMap) only knows about
+businesses that are physically map-able -- it returns zero results just
+as often for a real category with no OSM presence (SaaS companies,
+remote-first agencies, freelancers, ...) as for a genuine dead end. Rather
+than special-casing a fixed list of categories that "look like" they need
+a fallback (which would only ever cover categories someone thought to
+enumerate, and wouldn't generalize to whatever a person actually types),
+`_search` falls back to `business_search_fallback`
+(SerperBusinessSearchProvider by default) for ANY category whenever the
+primary provider comes back with zero candidates. Overpass is always
+tried first and never skipped -- the fallback only ever runs after it has
+already returned nothing.
 """
 
 import asyncio
@@ -46,7 +60,10 @@ from application.discovery.duplicate_detector import DuplicateDetector
 from application.discovery.exceptions import ProviderError, QueryParseError
 from application.discovery.providers.base import BusinessSearchProvider, WebsiteResolverProvider
 from application.discovery.providers.overpass_provider import OverpassProvider
-from application.discovery.providers.serper_provider import SerperWebsiteResolver
+from application.discovery.providers.serper_provider import (
+    SerperBusinessSearchProvider,
+    SerperWebsiteResolver,
+)
 from application.discovery.query_parser import QueryParser
 from application.discovery.ranking import rank_businesses
 from application.discovery.website_resolver import WebsiteResolver
@@ -69,6 +86,7 @@ class DiscoveryService:
         search_provider: Optional[BusinessSearchProvider] = None,
         resolver_fallback: Optional[WebsiteResolverProvider] = None,
         validator: Optional[WebsiteValidator] = None,
+        business_search_fallback: Optional[BusinessSearchProvider] = None,
     ):
         self.db = db
         self.parser = QueryParser()
@@ -78,6 +96,12 @@ class DiscoveryService:
             resolver_fallback if resolver_fallback is not None else SerperWebsiteResolver()
         )
         self.resolver = WebsiteResolver(self.validator, self.resolver_fallback)
+        # Only ever used when self.search_provider returns zero candidates
+        # -- see the module docstring and _search below. Pass
+        # business_search_fallback=None explicitly to disable it outright.
+        self.business_search_fallback = (
+            business_search_fallback if business_search_fallback is not None else SerperBusinessSearchProvider()
+        )
         self.max_concurrent_pipelines = max(
             1, int(os.getenv("DISCOVERY_MAX_CONCURRENT_PIPELINES", "3"))
         )
@@ -121,19 +145,18 @@ class DiscoveryService:
         ):
             ranked = rank_businesses(eligible, parsed.category, parsed.location)
         selected = ranked[: parsed.limit]
+        not_selected = ranked[parsed.limit :]
 
         outcomes = await self._create_leads_and_run_pipelines(selected, organization_id, owner_id)
 
-        # `outcomes` already has at most `parsed.limit` entries here (one
-        # per business in `selected`). Fill any remaining response slots
-        # with rejected/no-website businesses for diagnostic value (e.g.
-        # "why did I only get 3 of the 15 shoe stores you found?"), but
-        # never exceed the requested limit -- businesses beyond the limit,
-        # ranked-but-not-selected or rejected alike, are intentionally NOT
-        # itemized; `businesses_found` already reports the true total.
-        remaining_slots = max(0, parsed.limit - len(outcomes))
-        if remaining_slots > 0:
-            outcomes.extend(self._rejected_outcomes(rejected)[:remaining_slots])
+        # Full accounting, not a capped preview: every eligible business
+        # beyond the requested limit is reported (status "not_selected")
+        # rather than silently dropped, and every rejected business is
+        # reported too (see DiscoveryResponse's docstring) -- this is what
+        # lets a response answer "why did I only get 3 of the 15 shoe
+        # stores you found?" instead of just returning 3 with no context.
+        outcomes.extend(self._not_selected_outcomes(not_selected))
+        outcomes.extend(self._rejected_outcomes(rejected))
 
         duration_ms = int((time.time() - start) * 1000)
         validated_count = sum(1 for o in outcomes if o.status == "validated")
@@ -174,16 +197,48 @@ class DiscoveryService:
                     parsed.category, parsed.location, parsed.limit
                 )
             except ProviderError as e:
-                # Retries already happened inside the provider. There is no
-                # second business-search provider in this implementation
-                # (Brave is website-resolution-only per spec), so a
-                # provider failure degrades gracefully to zero candidates
-                # rather than failing the whole discovery request.
+                # Retries already happened inside the provider. A provider
+                # failure degrades gracefully to zero candidates (which the
+                # fallback below will then also try) rather than failing
+                # the whole discovery request.
                 logger.error(
                     f"Business search provider failed after retries: {e}",
                     extra={"event": "discovery_provider_failed", "provider": self.search_provider.name},
                 )
                 candidates = []
+
+        if not candidates and self.business_search_fallback is not None:
+            with stage_span(
+                "discovery_search_fallback",
+                provider=self.business_search_fallback.name,
+                category=parsed.category,
+                location=parsed.location,
+            ):
+                try:
+                    candidates = await self.business_search_fallback.search(
+                        parsed.category, parsed.location, parsed.limit
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"Business-search fallback failed: {e}",
+                        extra={
+                            "event": "discovery_provider_error",
+                            "provider": self.business_search_fallback.name,
+                        },
+                    )
+                    candidates = []
+            if candidates:
+                logger.info(
+                    "Primary search returned zero results; used web-search fallback",
+                    extra={
+                        "event": "discovery_search_fallback_used",
+                        "provider": self.business_search_fallback.name,
+                        "category": parsed.category,
+                        "location": parsed.location,
+                        "candidates_found": len(candidates),
+                    },
+                )
+
         return candidates
 
     # -- Stage: website resolution + validation --
@@ -335,6 +390,22 @@ class DiscoveryService:
         return list(results)
 
     # -- Outcome builders for businesses that never reached Lead creation --
+
+    @staticmethod
+    def _not_selected_outcomes(not_selected: List[DiscoveredBusiness]) -> List[LeadCreationOutcome]:
+        """Businesses that validated successfully but ranked below the
+        requested limit. No Lead is created for these (no pipeline cost
+        spent on results beyond what was asked for), but they're still
+        reported so the response accounts for every business found."""
+        return [
+            LeadCreationOutcome(
+                name=business.candidate.name,
+                website=business.resolution.website,
+                status="not_selected",
+                reason="Found and validated, but ranked beyond the requested result limit",
+            )
+            for business in not_selected
+        ]
 
     @staticmethod
     def _rejected_outcomes(rejected: List[DiscoveredBusiness]) -> List[LeadCreationOutcome]:

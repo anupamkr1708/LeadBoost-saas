@@ -70,3 +70,29 @@ def test_rank_businesses_sets_rank_score_on_every_item():
     businesses = [_business("A"), _business("B")]
     ranked = rank_businesses(businesses, "shoe stores", "Mumbai")
     assert all(b.rank_score >= 0 for b in ranked)
+
+
+def test_genuine_brand_domain_match_scores_higher_than_generic_domain():
+    """PART 5: 'business name similarity' / 'official website confidence'
+    is one of the combined signals -- a website whose domain genuinely
+    reflects the business's own name should score higher than an
+    otherwise-identical business whose domain doesn't, all else equal."""
+    branded = _business("Metro Shoes", website="https://metroshoes.com", validated=True)
+    generic_domain = _business("Metro Shoes", website="https://example.com", validated=True)
+
+    assert score_business(branded, "shoe stores", "Mumbai") > score_business(
+        generic_domain, "shoe stores", "Mumbai"
+    )
+
+
+def test_location_mentioned_in_domain_gives_partial_credit_without_address():
+    """A fallback-search-sourced candidate has no structured address, but
+    if the location is corroborated by the domain itself that's still
+    worth partial credit over a candidate with no location signal at
+    all."""
+    location_in_domain = _business("Acme Startup", website="https://acmestartupnoida.com", validated=True)
+    no_location_signal = _business("Acme Startup", website="https://acmestartup.io", validated=True)
+
+    assert score_business(location_in_domain, "startups", "Noida") > score_business(
+        no_location_signal, "startups", "Noida"
+    )

@@ -41,6 +41,16 @@ class ContextBuilder:
         previous_decisions = self.memory.get_previous_decisions(lead.id)
         previous_outreach = self.memory.get_previous_outreach(lead.id)
 
+        # Priority for who outreach is sent "from": the tenant's own
+        # organization profile (already fetched above) first, so every
+        # organization's outreach is personalized to them; SENDER_ORG is
+        # only a fallback for organizations that haven't set a name.
+        sender_org = (
+            organization.name.strip()
+            if organization and organization.name and organization.name.strip()
+            else os.getenv("SENDER_ORG", "Our Company")
+        )
+
         return LeadContext(
             lead_id=lead.id,
             organization_id=lead.organization_id,
@@ -59,7 +69,7 @@ class ContextBuilder:
             scraped_data=scraped_data or {},
             enriched_data=enriched_data or {},
             organization_name=organization.name if organization else None,
-            sender_org=os.getenv("SENDER_ORG", "Our Company"),
+            sender_org=sender_org,
             # CRM history is a pluggable extension point: no CRM is wired up
             # in this codebase yet, so it defaults to empty rather than
             # faking data. A future CRM integration populates this list

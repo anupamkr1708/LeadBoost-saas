@@ -294,3 +294,146 @@ async def test_invalid_query_raises_query_parse_error(db_session, sample_org, sa
             organization_id=sample_org.id,
             owner_id=sample_user.id,
         )
+
+
+# -- Business-search fallback (used only when the primary search returns ------
+# -- zero candidates -- not gated on any fixed category keyword list, so it
+# -- applies to whatever category was actually searched for) ------------------
+
+
+class _StubBusinessSearchFallback(BusinessSearchProvider):
+    name = "stub_fallback"
+
+    def __init__(self, candidates, raise_error: bool = False):
+        self._candidates = candidates
+        self._raise_error = raise_error
+        self.calls: List[tuple] = []
+
+    async def search(self, category, location, limit):
+        self.calls.append((category, location, limit))
+        if self._raise_error:
+            raise RuntimeError("fallback exploded")
+        return self._candidates
+
+
+async def test_fallback_used_when_primary_search_returns_nothing(
+    db_session, sample_org, sample_user, monkeypatch
+):
+    import application.discovery.discovery_service as svc_module
+
+    monkeypatch.setattr(svc_module, "run_lead_pipeline", _fake_run_lead_pipeline_success)
+
+    fallback_candidates = [_candidate("Acme AI", website="https://acmeai.example.com")]
+    fallback = _StubBusinessSearchFallback(fallback_candidates)
+
+    service = DiscoveryService(
+        db=db_session,
+        search_provider=_StubSearchProvider([]),  # primary finds nothing
+        resolver_fallback=_StubFallback({}),
+        validator=_AllOkValidator(),
+        business_search_fallback=fallback,
+    )
+
+    result = await service.discover_and_create_leads(
+        query="AI automation startups in Noida", organization_id=sample_org.id, owner_id=sample_user.id
+    )
+
+    assert fallback.calls == [("AI automation startups", "Noida", 20)]
+    assert result.businesses_found == 1
+    assert any(b.name == "Acme AI" and b.status == "validated" for b in result.businesses)
+
+
+async def test_fallback_not_used_when_primary_search_finds_candidates(
+    db_session, sample_org, sample_user, monkeypatch
+):
+    import application.discovery.discovery_service as svc_module
+
+    monkeypatch.setattr(svc_module, "run_lead_pipeline", _fake_run_lead_pipeline_success)
+
+    fallback = _StubBusinessSearchFallback([_candidate("Should Not Appear")])
+    candidates = [_candidate("Real Overpass Result", website="https://real.example.com")]
+
+    service = DiscoveryService(
+        db=db_session,
+        search_provider=_StubSearchProvider(candidates),
+        resolver_fallback=_StubFallback({}),
+        validator=_AllOkValidator(),
+        business_search_fallback=fallback,
+    )
+
+    result = await service.discover_and_create_leads(
+        query="Dentists in Pune", organization_id=sample_org.id, owner_id=sample_user.id
+    )
+
+    # Overpass is always tried first and never skipped -- the fallback
+    # must not be called at all when the primary provider already found
+    # something, regardless of category.
+    assert fallback.calls == []
+    assert result.businesses_found == 1
+    assert result.businesses[0].name == "Real Overpass Result"
+
+
+async def test_fallback_failure_degrades_gracefully(db_session, sample_org, sample_user):
+    fallback = _StubBusinessSearchFallback([], raise_error=True)
+
+    service = DiscoveryService(
+        db=db_session,
+        search_provider=_StubSearchProvider([]),
+        resolver_fallback=_StubFallback({}),
+        validator=_AllOkValidator(),
+        business_search_fallback=fallback,
+    )
+
+    result = await service.discover_and_create_leads(
+        query="Boutique consultancies in Jaipur", organization_id=sample_org.id, owner_id=sample_user.id
+    )
+
+    assert result.businesses_found == 0
+    assert result.businesses == []
+
+
+async def test_fallback_disabled_when_explicitly_none(db_session, sample_org, sample_user):
+    """Passing business_search_fallback=None explicitly (not just omitting
+    it) turns the fallback off entirely -- an explicit opt-out remains
+    possible even though a real fallback is wired in by default."""
+    service = DiscoveryService(
+        db=db_session,
+        search_provider=_StubSearchProvider([]),
+        resolver_fallback=_StubFallback({}),
+        validator=_AllOkValidator(),
+        business_search_fallback=None,
+    )
+
+    result = await service.discover_and_create_leads(
+        query="Anything in Nowhereville", organization_id=sample_org.id, owner_id=sample_user.id
+    )
+
+    assert result.businesses_found == 0
+
+
+async def test_fallback_applies_to_any_category_not_just_startups(
+    db_session, sample_org, sample_user, monkeypatch
+):
+    """The fallback trigger is 'the primary search found nothing', full
+    stop -- not a hardcoded list of SaaS/startup-sounding categories, so
+    it generalizes to any query a person actually types."""
+    import application.discovery.discovery_service as svc_module
+
+    monkeypatch.setattr(svc_module, "run_lead_pipeline", _fake_run_lead_pipeline_success)
+
+    fallback = _StubBusinessSearchFallback([_candidate("Jaipur Pottery Studio", website="https://jaipurpottery.example.com")])
+
+    service = DiscoveryService(
+        db=db_session,
+        search_provider=_StubSearchProvider([]),
+        resolver_fallback=_StubFallback({}),
+        validator=_AllOkValidator(),
+        business_search_fallback=fallback,
+    )
+
+    result = await service.discover_and_create_leads(
+        query="artisanal pottery studios in Jaipur", organization_id=sample_org.id, owner_id=sample_user.id
+    )
+
+    assert len(fallback.calls) == 1
+    assert result.businesses_found == 1

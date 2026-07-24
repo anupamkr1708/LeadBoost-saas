@@ -246,7 +246,14 @@ def process_lead_task(self, lead_id: int) -> Dict[str, Any]:
         subscription_service = SubscriptionService(db_subscription)
 
         if subscription_service.can_use_ai_features(lead.organization_id):
-            messenger = Messenger()
+            sender_org = None
+            try:
+                organization = lead.organization
+                if organization and organization.name and organization.name.strip():
+                    sender_org = organization.name.strip()
+            except Exception as e:
+                logger.warning(f"Could not load organization for lead {lead.id}: {e}")
+            messenger = Messenger(sender_org=sender_org)
             outreach_message = messenger.generate_message(lead)
         else:
             # Use a basic message if AI features are not available

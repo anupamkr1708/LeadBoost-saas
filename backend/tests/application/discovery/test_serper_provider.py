@@ -1,11 +1,11 @@
 """
-Tests for application.discovery.providers.serper_provider.SerperWebsiteResolver.
+Tests for application.discovery.providers.serper_provider.
 
-Every Serper HTTP response is mocked via tests.application.discovery.fakes
--- no real API calls, per the spec's testing requirements. Covers:
-successful resolution, no results, directory rejection, social media
-rejection, timeout, 429, invalid API key (401), and rejection by the
-existing website_validator once a candidate is handed to WebsiteResolver.
+Covers SerperWebsiteResolver (single-business website resolution fallback)
+and SerperBusinessSearchProvider (category+location discovery fallback,
+used only when Overpass returns zero results for a startup-like
+category). Every Serper HTTP response is mocked via
+tests.application.discovery.fakes -- no real API calls.
 """
 
 import aiohttp
@@ -13,8 +13,10 @@ import pytest
 
 from application.discovery.providers import http_utils
 from application.discovery.providers.serper_provider import (
+    SerperBusinessSearchProvider,
     SerperWebsiteResolver,
     _is_acceptable_result,
+    _looks_like_listicle,
     _score_result,
 )
 from application.discovery.website_resolver import WebsiteResolver
@@ -228,27 +230,88 @@ async def test_all_top5_results_rejected_returns_none(monkeypatch):
     assert result is None
 
 
-# -- Scoring unit tests -----------------------------------------------------------
+# -- Grounding: mandatory brand-relevance gate (regression tests for the -------
+# -- exact real-world bugs application.discovery.grounding was written to fix,
+# -- but which weren't actually caught until it was wired into this scorer) --
 
 
-def test_score_result_rewards_https_and_root_domain():
-    https_root = _score_result({"link": "https://acme.com/", "title": "Acme"}, "Acme", 0)
-    http_subpage = _score_result({"link": "http://acme.com/about", "title": "Acme"}, "Acme", 0)
-    assert https_root > http_subpage
+def test_score_result_rejects_unrelated_domain_despite_good_page_quality():
+    """The exact real-world bug: an https, root-path result used to clear
+    the old acceptance bar on generic quality signals alone, with zero
+    brand relevance required. 'Regal' (a Mumbai shoe store) must not
+    match regmovies.com (an unrelated US cinema chain) just because the
+    page is clean."""
+    assert (
+        _score_result({"link": "https://www.regmovies.com/", "title": "Regal Cinemas"}, "Regal", 0, "Mumbai")
+        is None
+    )
 
 
-def test_score_result_rewards_exact_brand_match():
-    exact = _score_result({"link": "https://acme.com/", "title": ""}, "Acme", 0)
-    unrelated = _score_result({"link": "https://totally-different.com/", "title": ""}, "Acme", 0)
-    assert exact > unrelated
+def test_score_result_rejects_incidental_substring_match():
+    """'walk' must not match 'walkoffame.com' just because it's a
+    substring -- the whole reason grounding.brand_match_strength exists
+    instead of a naive `in` check."""
+    assert (
+        _score_result(
+            {"link": "https://walkoffame.com/", "title": "Hollywood Walk of Fame"},
+            "Hollywood Walk of Shame",
+            0,
+            "Mumbai",
+        )
+        is None
+    )
+
+
+def test_score_result_accepts_genuine_brand_match():
+    assert (
+        _score_result({"link": "https://www.metroshoes.com/", "title": "Metro Shoes"}, "Metro Shoes", 0, "Mumbai")
+        is not None
+    )
+
+
+def test_score_result_rejects_generic_category_word_as_sole_brand_evidence():
+    """A domain that only shares a generic category word ('hospital') with
+    the business name is not evidence it's *this* business's site --
+    otherwise any hospital's domain would satisfy the gate for any other
+    same-category business."""
+    assert (
+        _score_result(
+            {"link": "https://www.cityhospitaldelhi.com/", "title": "City Hospital Delhi"},
+            "Guru Gobind Singh Hospital",
+            0,
+            "Patna",
+        )
+        is None
+    )
+
+
+def test_score_result_accepts_real_match_with_location_corroboration():
+    result = _score_result(
+        {"link": "https://ggsinghhospitalpatna.com/", "title": "Guru Gobind Singh Hospital, Patna"},
+        "Guru Gobind Singh Hospital",
+        0,
+        "Patna",
+    )
+    assert result is not None
 
 
 def test_score_result_returns_none_for_rejected_domain():
-    assert _score_result({"link": "https://www.facebook.com/acme", "title": ""}, "Acme", 0) is None
+    assert _score_result({"link": "https://www.facebook.com/acme", "title": ""}, "Acme", 0, "") is None
 
 
 def test_score_result_returns_none_for_missing_link():
-    assert _score_result({"title": "No link here"}, "Acme", 0) is None
+    assert _score_result({"title": "No link here"}, "Acme", 0, "") is None
+
+
+def test_score_result_rewards_https_and_root_domain_only_after_brand_gate():
+    """The generic https/root-path bonus still exists, but only ever
+    applies once the mandatory brand-relevance gate has already passed --
+    it's an ordering signal among genuine matches, not a substitute for
+    one."""
+    https_root = _score_result({"link": "https://acme.com/", "title": "Acme"}, "Acme", 0, "")
+    http_subpage = _score_result({"link": "http://acme.com/about", "title": "Acme"}, "Acme", 0, "")
+    assert https_root is not None and http_subpage is not None
+    assert https_root > http_subpage
 
 
 # -- Timeout / network failure ---------------------------------------------------
@@ -380,3 +443,105 @@ async def test_website_resolver_accepts_serper_candidate_that_passes_validation(
     assert resolution.website == "https://metroshoes-real.com/"
     assert resolution.validated is True
     assert resolution.resolved_via == "serper"
+
+
+# -- SerperBusinessSearchProvider (Part 4: Overpass-zero fallback) -------------
+
+
+async def test_business_search_returns_none_configured_produces_empty_list(monkeypatch):
+    provider = SerperBusinessSearchProvider(api_key=None)
+    assert provider.is_configured() is False
+    result = await provider.search("SaaS startups", "Noida", 10)
+    assert result == []
+
+
+async def test_business_search_never_calls_network_when_key_missing(monkeypatch):
+    called = {"n": 0}
+
+    class ExplodingSession:
+        def __init__(self, *a, **kw):
+            called["n"] += 1
+
+    monkeypatch.setattr(aiohttp, "ClientSession", ExplodingSession)
+
+    provider = SerperBusinessSearchProvider(api_key=None)
+    await provider.search("SaaS startups", "Noida", 10)
+    assert called["n"] == 0
+
+
+async def test_business_search_builds_candidates_from_organic_results(monkeypatch):
+    fake_response = FakeResponse(
+        status=200,
+        json_data={
+            "organic": [
+                {"link": "https://acmeai.example.com/", "title": "Acme AI | Automation Platform"},
+                {"link": "https://www.facebook.com/somestartup", "title": "Some Startup | Facebook"},
+                {"link": "https://betaworks.example.com/", "title": "BetaWorks - Home"},
+            ]
+        },
+    )
+    monkeypatch.setattr(aiohttp, "ClientSession", lambda *a, **kw: FakeSession(fake_response))
+
+    provider = SerperBusinessSearchProvider(api_key="fake-key")
+    candidates = await provider.search("AI automation startups", "Noida", 10)
+
+    names = [c.name for c in candidates]
+    websites = [c.website for c in candidates]
+    assert "Acme AI" in names
+    assert "BetaWorks" in names
+    assert not any("facebook.com" in (w or "") for w in websites)
+    assert all(c.category == "AI automation startups" for c in candidates)
+    assert all(c.source == "serper_business_search" for c in candidates)
+
+
+async def test_business_search_filters_out_listicle_titles():
+    assert _looks_like_listicle("Top 10 AI Startups in Noida") is True
+    assert _looks_like_listicle("Best 15 SaaS Companies to Watch") is True
+    assert _looks_like_listicle("Acme AI - Home") is False
+
+
+async def test_business_search_deduplicates_by_domain(monkeypatch):
+    fake_response = FakeResponse(
+        status=200,
+        json_data={
+            "organic": [
+                {"link": "https://acmeai.example.com/", "title": "Acme AI"},
+                {"link": "https://acmeai.example.com/about", "title": "Acme AI - About"},
+            ]
+        },
+    )
+    monkeypatch.setattr(aiohttp, "ClientSession", lambda *a, **kw: FakeSession(fake_response))
+
+    provider = SerperBusinessSearchProvider(api_key="fake-key")
+    candidates = await provider.search("AI automation startups", "Noida", 10)
+
+    assert len(candidates) == 1
+
+
+async def test_business_search_respects_limit(monkeypatch):
+    fake_response = FakeResponse(
+        status=200,
+        json_data={
+            "organic": [
+                {"link": f"https://company{i}.example.com/", "title": f"Company {i}"} for i in range(10)
+            ]
+        },
+    )
+    monkeypatch.setattr(aiohttp, "ClientSession", lambda *a, **kw: FakeSession(fake_response))
+
+    provider = SerperBusinessSearchProvider(api_key="fake-key")
+    candidates = await provider.search("software companies", "Bangalore", 3)
+
+    assert len(candidates) == 3
+
+
+async def test_business_search_handles_network_failure_gracefully(monkeypatch):
+    monkeypatch.setattr(
+        aiohttp, "ClientSession", lambda *a, **kw: FakeSessionRaises(aiohttp.ClientError("down"))
+    )
+    monkeypatch.setattr("asyncio.sleep", _instant_sleep)
+
+    provider = SerperBusinessSearchProvider(api_key="fake-key")
+    candidates = await provider.search("SaaS startups", "Noida", 10)
+
+    assert candidates == []

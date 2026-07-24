@@ -66,8 +66,21 @@ def generate_template_message(lead: Lead) -> Optional[str]:
     Agent as its guaranteed-safe fallback when the LLM is unavailable, and
     reused directly (not duplicated) rather than re-implementing template
     logic in the Application layer.
+
+    Sender-org priority matches ContextBuilder's LLM-path behavior (PART
+    7): the lead's own organization profile in the database first, falling
+    back to Messenger's own SENDER_ORG-env-var default only when that
+    organization has no name set (or isn't loadable).
     """
-    messenger = Messenger()
+    sender_org = None
+    try:
+        organization = lead.organization
+        if organization and organization.name and organization.name.strip():
+            sender_org = organization.name.strip()
+    except Exception as e:
+        logger.warning(f"Could not load organization for lead {lead.id}, using default sender: {e}")
+
+    messenger = Messenger(sender_org=sender_org)
     return messenger.generate_message(lead)
 
 

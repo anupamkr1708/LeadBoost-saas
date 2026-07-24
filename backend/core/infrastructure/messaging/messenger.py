@@ -25,8 +25,12 @@ class Messenger:
     strict fallback templates when company context is missing.
     """
 
-    def __init__(self):
-        self.sender_org = os.getenv("SENDER_ORG", "Our Company")
+    def __init__(self, sender_org: Optional[str] = None):
+        # Priority: an explicitly-passed sender_org (e.g. the caller's own
+        # organization profile from the database) first, SENDER_ORG env
+        # var as the fallback for callers that don't have one -- see
+        # application.services.infra_adapters.generate_template_message.
+        self.sender_org = sender_org or os.getenv("SENDER_ORG", "Our Company")
         self.model_name = os.getenv("LLM_MODEL", "llama-3.3-70b-versatile")
 
     def generate_message(self, lead: Lead) -> Optional[str]:
