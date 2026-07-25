@@ -22,6 +22,7 @@ frontend-react/.env
 venv/
 env/
 backend/venv/
+.venv/
 
 # ----------------------
 # Node

@@ -85,6 +85,13 @@ _TOP_PATTERN = re.compile(
 )
 _PLAIN_PATTERN = re.compile(rf"^\s*(.+?)\s+{_LOCATION_PREPOSITION}\s+(.+?)\s*$", re.IGNORECASE)
 
+# A captured location can itself carry a trailing purpose/goal qualifier
+# ("patna for eye treatment", "Mumbai for family dining") -- the
+# preposition patterns above capture everything up to the end of the
+# string, so anything after a standalone "for" would otherwise be treated
+# as part of the place name itself.
+_TRAILING_PURPOSE_PATTERN = re.compile(r"^(.*?)\s+for\s+(.+)$", re.IGNORECASE)
+
 # Words/phrases that are grammatically valid "location" slots but are not
 # an actual place -- accepting them would send an ungrounded location like
 # "me" or "here" straight to Overpass/the fallback search, which would
@@ -117,18 +124,21 @@ class QueryParser:
             limit_str, category, location = match.groups()
             limit = int(limit_str)
             modifier = "top"
+            category, location = self._split_trailing_purpose_qualifier(category, location)
         else:
             match = _TOP_PATTERN.match(raw)
             if match:
                 category, location = match.groups()
                 limit = _DEFAULT_LIMIT
                 modifier = "top"
+                category, location = self._split_trailing_purpose_qualifier(category, location)
             else:
                 match = _PLAIN_PATTERN.match(raw)
                 if match:
                     category, location = match.groups()
                     limit = _DEFAULT_LIMIT
                     modifier = None
+                    category, location = self._split_trailing_purpose_qualifier(category, location)
                 else:
                     split = self._split_without_preposition(raw)
                     if split is None:
@@ -167,6 +177,26 @@ class QueryParser:
             modifier=modifier,
             raw_query=query,
         )
+
+    @staticmethod
+    def _split_trailing_purpose_qualifier(category: str, location: str) -> Tuple[str, str]:
+        """Move a trailing purpose/goal qualifier ("... for eye
+        treatment") off of the captured location and back onto the
+        category, so "Hospitals in patna for eye treatment" parses as
+        category="Hospitals for eye treatment", location="patna" instead
+        of leaking "for eye treatment" into the location -- which would
+        otherwise be sent to Overpass/the fallback search as if it were
+        part of the place name and never geocode to anything."""
+        match = _TRAILING_PURPOSE_PATTERN.match(location)
+        if not match:
+            return category, location
+        before, after = match.group(1).strip(), match.group(2).strip()
+        if not before:
+            # Nothing usable before "for" (e.g. location was just "for
+            # eye treatment") -- leave it alone rather than produce an
+            # empty location.
+            return category, location
+        return f"{category} for {after}".strip(), before
 
     @staticmethod
     def _strip_filler_prefix(text: str) -> str:

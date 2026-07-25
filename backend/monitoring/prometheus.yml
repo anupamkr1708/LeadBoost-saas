@@ -1,0 +1,24 @@
+# Prometheus configuration for LeadBoost.
+#
+# Scrapes the backend's own /metrics endpoint (see
+# core/observability/prometheus_metrics.py) plus itself. Add
+# postgres_exporter / redis_exporter jobs here if/when those are added --
+# neither is included by default to keep the base monitoring stack
+# minimal and because the backend's own metrics already cover the
+# request/auth/discovery/pipeline numbers this brief asks for.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: "leadboost-backend"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["backend:8000"]
+        labels:
+          service: "leadboost-backend"
+
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]

@@ -57,6 +57,7 @@ REJECTED_DOMAINS = (
     "exportersindia.com",
     "tripadvisor.com",
     "yellowpages.com",
+    "yellowpages.in",
     "google.com",
     "maps.google.com",
     "youtube.com",
@@ -70,6 +71,21 @@ REJECTED_DOMAINS = (
     "olx.in",
     "quikr.com",
     "wikipedia.org",
+    # Travel/booking aggregators: these routinely rank well for
+    # "<business name> <city>" searches (e.g. "hotels/attractions near
+    # X") and their page titles often contain the business's exact name
+    # for SEO purposes -- which otherwise looks like a strong match --
+    # without being anywhere close to that business's own site.
+    "agoda.com",
+    "booking.com",
+    "practo.com",
+    "medindia.net",
+    "expedia.com",
+    "makemytrip.com",
+    "goibibo.com",
+    "trivago.com",
+    "zomato.com",
+    "swiggy.com",
 )
 
 _ACCEPTED_STATUS_CODES = (200, 301, 302)
@@ -78,6 +94,18 @@ _ACCEPTED_STATUS_CODES = (200, 301, 302)
 # core.infrastructure.scraping.scraper for the same reason: a bare
 # User-Agent alone is a strong non-browser signal that trips some sites'
 # bot detection even for entirely legitimate requests).
+#
+# Accept-Encoding deliberately excludes "br" (Brotli): aiohttp still
+# advertises whatever is listed here regardless of whether a Brotli
+# decoder is actually installed, and this environment has none. Many
+# modern sites/CDNs (Cloudflare, Vercel, etc.) will then compress the
+# response with Brotli anyway, which aiohttp cannot decode when draining
+# the response to free the connection -- even though this validator never
+# reads the body -- and the request fails with "Can not decode
+# content-encoding: brotli (br)". That was silently rejecting a large
+# fraction of genuinely valid websites as unreachable. Requesting only
+# gzip/deflate (which every server supports) avoids the failure mode
+# entirely with no new dependency.
 _DEFAULT_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -85,7 +113,7 @@ _DEFAULT_HEADERS = {
     ),
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
-    "Accept-Encoding": "gzip, deflate, br",
+    "Accept-Encoding": "gzip, deflate",
     "Connection": "keep-alive",
     "Upgrade-Insecure-Requests": "1",
 }

@@ -437,3 +437,83 @@ async def test_fallback_applies_to_any_category_not_just_startups(
 
     assert len(fallback.calls) == 1
     assert result.businesses_found == 1
+
+
+# -- Bounded concurrency for website resolution (performance) ---------------
+
+
+async def test_resolution_runs_with_bounded_concurrency_not_sequentially(
+    db_session, sample_org, sample_user, monkeypatch
+):
+    """Website resolution used to run strictly one-at-a-time, which
+    dominated discovery latency (60-90+ seconds for ~30 candidates in
+    production). It must now overlap resolutions up to the configured
+    worker-pool size, never more."""
+    import asyncio
+
+    import application.discovery.discovery_service as svc_module
+
+    monkeypatch.setattr(svc_module, "run_lead_pipeline", _fake_run_lead_pipeline_success)
+    monkeypatch.setenv("DISCOVERY_MAX_CONCURRENT_RESOLUTIONS", "4")
+
+    in_flight = {"current": 0, "max_seen": 0}
+
+    class _ConcurrencyTrackingValidator(_AllOkValidator):
+        async def validate(self, url):
+            in_flight["current"] += 1
+            in_flight["max_seen"] = max(in_flight["max_seen"], in_flight["current"])
+            await asyncio.sleep(0.02)
+            in_flight["current"] -= 1
+            return await super().validate(url)
+
+    candidates = [_candidate(f"Business {i}", website=f"https://biz{i}.example.com") for i in range(12)]
+
+    service = DiscoveryService(
+        db=db_session,
+        search_provider=_StubSearchProvider(candidates),
+        resolver_fallback=_StubFallback({}),
+        validator=_ConcurrencyTrackingValidator(),
+    )
+
+    await service.discover_and_create_leads(
+        query="Businesses in Testville", organization_id=sample_org.id, owner_id=sample_user.id
+    )
+
+    assert in_flight["max_seen"] > 1, "resolutions ran strictly sequentially, no speedup gained"
+    assert in_flight["max_seen"] <= 4, "exceeded the configured concurrency limit"
+
+
+async def test_resolution_results_preserve_candidate_order_despite_concurrency(
+    db_session, sample_org, sample_user, monkeypatch
+):
+    """Concurrent completion order must never scramble which website
+    outcome belongs to which candidate."""
+    import asyncio
+
+    import application.discovery.discovery_service as svc_module
+
+    monkeypatch.setattr(svc_module, "run_lead_pipeline", _fake_run_lead_pipeline_success)
+
+    # Deliberately finish in reverse order (last candidate resolves
+    # fastest) to prove ordering isn't just an accident of scheduling.
+    class _ReverseOrderValidator(_AllOkValidator):
+        async def validate(self, url):
+            index = int(url.rsplit("biz", 1)[1].split(".")[0])
+            await asyncio.sleep(0.05 - index * 0.01)
+            return await super().validate(url)
+
+    candidates = [_candidate(f"Business {i}", website=f"https://biz{i}.example.com") for i in range(5)]
+
+    service = DiscoveryService(
+        db=db_session,
+        search_provider=_StubSearchProvider(candidates),
+        resolver_fallback=_StubFallback({}),
+        validator=_ReverseOrderValidator(),
+    )
+
+    result = await service.discover_and_create_leads(
+        query="Businesses in Testville", organization_id=sample_org.id, owner_id=sample_user.id
+    )
+
+    names_in_order = [b.name for b in result.businesses]
+    assert names_in_order == [f"Business {i}" for i in range(5)]

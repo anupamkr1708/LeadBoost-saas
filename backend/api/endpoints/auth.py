@@ -27,6 +27,7 @@ from core.infrastructure.database.crud import (
     create_organization,
     create_user,
 )
+from core.observability.prometheus_metrics import auth_attempts_total
 
 router = APIRouter()
 
@@ -120,6 +121,7 @@ async def login_user(
     
     user = get_user_by_email(db, email=form_data.username)
     if not user or not verify_password(form_data.password, user.hashed_password):
+        auth_attempts_total.labels(result="failure").inc()
         logger.warning(
             "Failed login attempt",
             extra={
@@ -134,6 +136,7 @@ async def login_user(
         )
 
     if not user.is_active:
+        auth_attempts_total.labels(result="failure").inc()
         logger.warning(
             "Failed login attempt",
             extra={
@@ -157,6 +160,7 @@ async def login_user(
     # Create refresh token
     refresh_token = create_refresh_token(data={"sub": str(user.id)})
 
+    auth_attempts_total.labels(result="success").inc()
     logger.info(
         "User logged in successfully",
         extra={

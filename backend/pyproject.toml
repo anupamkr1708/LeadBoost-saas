@@ -1,0 +1,39 @@
+[tool.black]
+line-length = 110
+target-version = ["py312"]
+extend-exclude = '''
+/(
+  \.venv
+  | tests/scraper  # standalone verification scripts, not part of the app
+)/
+'''
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+extend-exclude = ["tests/scraper"]
+
+[tool.ruff.lint]
+# Deliberately narrow to genuine-bug-signal rules for this pass (unused
+# imports/variables, obvious errors) rather than turning on the full
+# stylistic rule set -- this is an existing, working codebase this brief
+# asks to polish, not rewrite to a new style guide. Widen this list
+# incrementally in follow-up PRs rather than all at once.
+select = ["E9", "F", "B"]
+ignore = [
+    "F401", # unused-import: several modules intentionally import for
+    # side effects (model registration) or re-export.
+    "B008", # function-call-in-default-argument: FastAPI's Depends()/Query()
+    # pattern *is* this, by design -- not a bug in a FastAPI codebase.
+]
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+# Same rationale as ruff above: this pass adds mypy to CI as a *visible*
+# signal (see the CI workflow's continue-on-error) without gating merges
+# on retrofitting full type coverage onto a codebase that wasn't
+# originally written against it.
+check_untyped_defs = false
+disallow_untyped_defs = false
+exclude = ["tests/scraper/"]

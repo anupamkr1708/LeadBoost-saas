@@ -97,6 +97,33 @@ def test_ai_automation_startups_no_preposition(parser):
     assert result.location == "noida"
 
 
+# -- Trailing purpose/goal qualifier doesn't leak into location -------------
+
+
+def test_trailing_purpose_qualifier_moves_to_category(parser):
+    """Regression test: 'Hospitals in patna for eye treatment' was
+    parsing location as 'patna for eye treatment' (sent straight to
+    Overpass, which can't geocode it, and the fallback search inherited
+    the same broken location), instead of location='patna' with the
+    purpose folded into the category."""
+    result = parser.parse("Hospitals in patna for eye treatment")
+    assert result.location == "patna"
+    assert result.category == "Hospitals for eye treatment"
+
+
+def test_trailing_purpose_qualifier_with_multiword_location(parser):
+    result = parser.parse("Restaurants in Mumbai for family dining")
+    assert result.location == "Mumbai"
+    assert result.category == "Restaurants for family dining"
+
+
+def test_location_containing_for_as_substring_is_not_split(parser):
+    """'Fort Kochi' must not be mistaken for '... for Kochi' -- the split
+    only fires on 'for' as its own whitespace-delimited word."""
+    result = parser.parse("restaurants in Fort Kochi")
+    assert result.location == "Fort Kochi"
+
+
 # -- Placeholder-location rejection ("near me" isn't a real place) ----------
 
 

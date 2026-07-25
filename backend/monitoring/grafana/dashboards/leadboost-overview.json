@@ -1,0 +1,136 @@
+{
+  "title": "LeadBoost - Overview",
+  "uid": "leadboost-overview",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Request rate (per route)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum(rate(http_requests_total[5m])) by (path)",
+          "legendFormat": "{{path}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Error rate (4xx/5xx) by route",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum(rate(http_requests_total{status_code=~\"4..|5..\"}[5m])) by (path, status_code)",
+          "legendFormat": "{{path}} ({{status_code}})"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "p95 request latency by route",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, path))",
+          "legendFormat": "{{path}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Authentication attempts",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "targets": [
+        {
+          "expr": "sum(rate(auth_attempts_total[5m])) by (result)",
+          "legendFormat": "{{result}}"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Discovery runs (24h window)",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 16 },
+      "targets": [{ "expr": "discovery_runs_total" }]
+    },
+    {
+      "id": 6,
+      "title": "Discovery success rate (%)",
+      "type": "gauge",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 16 },
+      "fieldConfig": { "defaults": { "min": 0, "max": 100, "unit": "percent" }, "overrides": [] },
+      "targets": [{ "expr": "discovery_success_rate_pct" }]
+    },
+    {
+      "id": 7,
+      "title": "Avg discovery duration (s)",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 16 },
+      "targets": [{ "expr": "discovery_duration_seconds_avg" }]
+    },
+    {
+      "id": 8,
+      "title": "Website resolution success rate (%)",
+      "type": "gauge",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 16 },
+      "fieldConfig": { "defaults": { "min": 0, "max": 100, "unit": "percent" }, "overrides": [] },
+      "targets": [{ "expr": "website_resolution_rate_pct" }]
+    },
+    {
+      "id": 9,
+      "title": "Pipeline runs (24h window)",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 20 },
+      "targets": [{ "expr": "pipeline_runs_total" }]
+    },
+    {
+      "id": 10,
+      "title": "Pipeline success rate (%)",
+      "type": "gauge",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 20 },
+      "fieldConfig": { "defaults": { "min": 0, "max": 100, "unit": "percent" }, "overrides": [] },
+      "targets": [{ "expr": "pipeline_success_rate_pct" }]
+    },
+    {
+      "id": 11,
+      "title": "Avg pipeline duration (s)",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 20 },
+      "targets": [{ "expr": "pipeline_duration_seconds_avg" }]
+    },
+    {
+      "id": 12,
+      "title": "Organizations / Leads (total)",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 20 },
+      "targets": [
+        { "expr": "organizations_total", "legendFormat": "organizations" },
+        { "expr": "leads_total", "legendFormat": "leads" }
+      ]
+    },
+    {
+      "id": 13,
+      "title": "Process memory (RSS)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
+      "targets": [{ "expr": "process_resident_memory_bytes", "legendFormat": "RSS" }]
+    },
+    {
+      "id": 14,
+      "title": "Process CPU usage",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "targets": [{ "expr": "rate(process_cpu_seconds_total[5m])", "legendFormat": "CPU seconds/sec" }]
+    }
+  ]
+}

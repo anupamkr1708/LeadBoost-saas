@@ -1,0 +1,51 @@
+# Version control
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.egg-info
+.Python
+*.so
+.venv
+venv/
+env/
+
+# Tests and dev tooling (not needed in the runtime image; CI runs tests
+# against the source tree directly, not inside the built image)
+tests/
+.pytest_cache
+.mypy_cache
+.coverage
+htmlcov/
+
+# Local env / secrets -- never bake these into an image layer
+.env
+.env.*
+!.env.example
+
+# Local databases created by dev/test runs
+*.db
+*.db-journal
+
+# Docs / non-runtime files
+docs/
+*.md
+!README.md
+
+# Docker-related files themselves
+docker-compose*.yml
+Dockerfile*
+.dockerignore
+
+# CI
+.github/
+
+# OS/editor cruft
+.DS_Store
+*.swp
+.idea/
+.vscode/

@@ -1,13 +1,28 @@
 import aiohttp
 import pytest
 
-from application.discovery.website_validator import WebsiteValidator, domain_of, is_rejected_domain
+from application.discovery.website_validator import (
+    _DEFAULT_HEADERS,
+    WebsiteValidator,
+    domain_of,
+    is_rejected_domain,
+)
 from tests.application.discovery.fakes import FakeResponse, FakeSession, FakeSessionRaises
 
 
 def test_domain_of_strips_www_and_path():
     assert domain_of("https://www.nike.com/shoes?x=1") == "nike.com"
     assert domain_of("https://nike.com") == "nike.com"
+
+
+def test_accept_encoding_never_advertises_brotli():
+    """Regression test: this environment has no Brotli decoder installed.
+    Advertising 'br' in Accept-Encoding let servers respond with
+    Brotli-compressed content that aiohttp then failed to drain when
+    releasing the connection (even though the body is never read here),
+    raising 'Can not decode content-encoding: brotli (br)' and wrongly
+    rejecting a large fraction of genuinely valid websites."""
+    assert "br" not in [enc.strip() for enc in _DEFAULT_HEADERS["Accept-Encoding"].split(",")]
 
 
 @pytest.mark.parametrize(
@@ -21,6 +36,23 @@ def test_domain_of_strips_www_and_path():
     ],
 )
 def test_is_rejected_domain_true_for_directories_and_social(url):
+    assert is_rejected_domain(url) is True
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://www.agoda.com/hotels-near-mascot-dental-clinic/attractions/bangalore-in.html",
+        "https://www.booking.com/hotel/in/some-clinic.html",
+        "https://www.practo.com/bangalore/clinic/some-clinic",
+        "https://www.medindia.net/patients/hospital_search/some-clinic.htm",
+    ],
+)
+def test_is_rejected_domain_true_for_travel_and_health_directory_aggregators(url):
+    """Regression test: these were previously passing through as
+    'official websites' for unrelated businesses purely because their
+    page titles happened to mention the business name for SEO purposes
+    (e.g. a dental clinic's Agoda 'hotels near' page)."""
     assert is_rejected_domain(url) is True
 
 

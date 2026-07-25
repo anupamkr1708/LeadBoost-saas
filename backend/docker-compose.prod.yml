@@ -1,0 +1,185 @@
+# Production-shaped compose file -- for self-hosted/VPS deployment.
+#
+# The actual deployment target described in the brief is Vercel
+# (frontend) + Render (backend), where you do not run docker-compose at
+# all -- Render builds straight from the Dockerfile, and there is no use
+# for Postgres/Redis/MinIO/Grafana containers running alongside it
+# (you'd use Render's managed Postgres, a managed Redis, etc.). This file
+# exists for the "optional, for future VPS deployment" case mentioned
+# in the brief -- a single machine running everything, fronted by the
+# optional deploy/nginx.conf.
+#
+# Usage:
+#   cp .env.example .env   # then fill in real secrets
+#   docker compose -f docker-compose.prod.yml up -d
+#
+# Every service other than backend/postgres/redis is optional and can be
+# commented out independently -- MinIO (S3-compatible storage) isn't used
+# by any code path yet (no file-upload feature exists in this backend),
+# it's included as ready-to-use infrastructure for when one is added;
+# pgAdmin/Grafana are operator conveniences, not required for the app to
+# function.
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-leadboost}:${POSTGRES_PASSWORD:-leadboost}@postgres:5432/${POSTGRES_DB:-leadboost}
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      ENVIRONMENT: production
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/live"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - leadboost-internal
+      - leadboost-public
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-leadboost}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-leadboost}
+      POSTGRES_DB: ${POSTGRES_DB:-leadboost}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-leadboost}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - leadboost-internal
+    # Not published to the host network on purpose -- only `backend` and
+    # `pgadmin` (both on leadboost-internal) can reach it.
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - leadboost-internal
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-leadboost}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-leadboost123}
+    ports:
+      - "9000:9000" # S3 API
+      - "9001:9001" # Web console
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - leadboost-internal
+      - leadboost-public
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@leadboost.local}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      - postgres
+    restart: unless-stopped
+    networks:
+      - leadboost-internal
+      - leadboost-public
+
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=15d"
+    ports:
+      - "9090:9090"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - leadboost-internal
+      - leadboost-public
+
+  grafana:
+    image: grafana/grafana:latest
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      - "3001:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    networks:
+      - leadboost-internal
+      - leadboost-public
+
+networks:
+  # Postgres/Redis/MinIO's S3 API are reachable only from other
+  # containers on this network -- never published directly to the host
+  # except where explicitly listed above (MinIO's console, pgAdmin,
+  # Prometheus, Grafana), keeping the actual data stores unreachable from
+  # outside the Docker host entirely.
+  leadboost-internal:
+    driver: bridge
+    internal: false # set true if you don't need host access to any of
+    # the admin UIs at all (SSH tunnel in instead) -- left false by
+    # default so pgAdmin/Grafana/Prometheus/MinIO console are directly
+    # reachable during initial setup.
+  leadboost-public:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+  pgadmin_data:
+  prometheus_data:
+  grafana_data:

@@ -105,6 +105,15 @@ class DiscoveryService:
         self.max_concurrent_pipelines = max(
             1, int(os.getenv("DISCOVERY_MAX_CONCURRENT_PIPELINES", "3"))
         )
+        # Website resolution/validation is near-pure network I/O wait
+        # (Serper API + HTTP checks), so a modest worker pool captures
+        # most of the available speedup without holding more than a
+        # handful of requests in flight at once -- kept low by default to
+        # stay predictable on a memory-constrained deployment (e.g.
+        # Render's Starter tier, ~500MB).
+        self.max_concurrent_resolutions = max(
+            1, int(os.getenv("DISCOVERY_MAX_CONCURRENT_RESOLUTIONS", "5"))
+        )
 
     async def discover_and_create_leads(
         self,
@@ -246,11 +255,23 @@ class DiscoveryService:
     async def _resolve_and_validate(
         self, candidates: List[BusinessCandidate], location: str
     ) -> "tuple[List[DiscoveredBusiness], int]":
-        discovered: List[DiscoveredBusiness] = []
+        """Resolves and validates each candidate's website with bounded
+        concurrency (default 5 at a time -- see
+        DISCOVERY_MAX_CONCURRENT_RESOLUTIONS). This stage dominated
+        discovery latency (60-90+ seconds for ~30 candidates) because
+        website resolution/validation is almost entirely spent waiting on
+        network I/O (Serper API calls, HTTP HEAD/GET checks against
+        candidate sites) -- a small worker pool gets most of the possible
+        speedup from overlapping that wait time without meaningfully
+        increasing memory (each in-flight resolution is one aiohttp
+        request, not a heavy process/thread), which matters on a
+        constrained deployment target. Results preserve the original
+        candidate order regardless of which finished first."""
         resolved_via_fallback_count = 0
+        semaphore = asyncio.Semaphore(self.max_concurrent_resolutions)
 
-        with stage_span("discovery_resolve_validate", candidate_count=len(candidates)):
-            for candidate in candidates:
+        async def resolve_one(candidate: BusinessCandidate) -> DiscoveredBusiness:
+            async with semaphore:
                 try:
                     resolution = await self.resolver.resolve(candidate, location)
                 except Exception as e:
@@ -262,10 +283,14 @@ class DiscoveryService:
                         validated=False,
                         rejection_reason="resolution_error",
                     )
-                if resolution.resolved_via == "brave":
-                    resolved_via_fallback_count += 1
-                discovered.append(DiscoveredBusiness(candidate=candidate, resolution=resolution))
+            return DiscoveredBusiness(candidate=candidate, resolution=resolution)
 
+        with stage_span("discovery_resolve_validate", candidate_count=len(candidates)):
+            discovered = list(await asyncio.gather(*[resolve_one(c) for c in candidates]))
+
+        resolved_via_fallback_count = sum(
+            1 for b in discovered if b.resolution.resolved_via == "brave"
+        )
         return discovered, resolved_via_fallback_count
 
     # -- Stage: duplicate detection (in-batch) --

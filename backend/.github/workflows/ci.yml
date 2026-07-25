@@ -1,0 +1,178 @@
+name: CI
+
+# Validates every push/PR -- formatting, lint, type-checking, tests,
+# Docker build, and a dependency security scan. Never deploys anything;
+# SECTION 6 of the brief is explicit that this pipeline validates only.
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  python-quality:
+    name: Python formatting, lint, type-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install black ruff mypy
+
+      # These three run in report-only mode (continue-on-error) rather
+      # than blocking merges: this pipeline is being added to an
+      # existing, already-working codebase that wasn't developed against
+      # any of these tools, and the brief is explicit about polishing
+      # rather than mass-rewriting working code to satisfy a new style
+      # guide. They still surface every finding in the Actions log/
+      # annotations so issues are visible and can be cleaned up
+      # incrementally. Promote any of these to a hard gate (drop
+      # continue-on-error) once the codebase is clean under it.
+      - name: Black (formatting check)
+        continue-on-error: true
+        run: black --check --diff .
+
+      - name: Ruff (lint)
+        continue-on-error: true
+        run: ruff check --output-format=github .
+
+      - name: Mypy (type check)
+        continue-on-error: true
+        run: mypy . || true
+
+  backend-tests:
+    name: Backend unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio
+
+      - name: Install Playwright browser (chromium only)
+        run: playwright install --with-deps chromium
+
+      - name: Run tests
+        env:
+          DATABASE_URL: "sqlite:///./ci_test.db"
+          SECRET_KEY: "ci-test-secret-not-for-production-use-only"
+          ENVIRONMENT: "development"
+        run: |
+          pytest tests/ -v \
+            --ignore=tests/scraper \
+            --junitxml=test-results.xml
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-results
+          path: test-results.xml
+          retention-days: 14
+
+  security-scan:
+    name: Dependency security scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+          cache-dependency-path: requirements.txt
+
+      - name: Install pip-audit
+        run: pip install pip-audit
+
+      # Report-only: a known-CVE transitive dependency shouldn't silently
+      # block every PR with no path to merge while a fix is pending
+      # upstream, but it must be visible. Flip to a hard failure (drop
+      # `|| true`) once you want this to gate merges.
+      - name: Audit Python dependencies
+        run: pip-audit -r requirements.txt || true
+
+  docker-build:
+    name: Docker build validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build backend image (validation only, never pushed)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: false
+          tags: leadboost-backend:ci-validation
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  frontend:
+    name: Frontend lint & build
+    runs-on: ubuntu-latest
+    # This backend repository doesn't include frontend source, so this
+    # job no-ops gracefully rather than failing when ../frontend or a
+    # sibling frontend/ directory isn't present -- wire the real
+    # `working-directory: frontend` path in once the frontend project is
+    # part of this repo (or a separate workflow in that repo, if it lives
+    # elsewhere).
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for frontend directory
+        id: check
+        run: |
+          if [ -d "frontend" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "No frontend/ directory in this repo -- skipping frontend lint/build."
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.check.outputs.present == 'true'
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        if: steps.check.outputs.present == 'true'
+        working-directory: frontend
+        run: npm ci
+
+      - name: Lint frontend
+        if: steps.check.outputs.present == 'true'
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Build frontend
+        if: steps.check.outputs.present == 'true'
+        working-directory: frontend
+        run: npm run build

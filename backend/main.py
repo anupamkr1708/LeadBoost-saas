@@ -19,6 +19,7 @@ import time
 from core.infrastructure.database import init_db, get_db
 from api.endpoints import leads, auth, organizations, billing, analytics, discovery
 from core.infrastructure.logging import setup_logging
+from core.observability import prometheus_metrics
 
 # Load environment variables
 load_dotenv()
@@ -32,7 +33,11 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Application lifecycle manager with retry logic"""
     logger.info("Initializing LeadBoost SaaS API")
-    
+
+    from core.config import validate_startup_environment
+
+    validate_startup_environment()
+
     # Initialize database with retry
     max_retries = 5
     retry_delay = 2
@@ -122,11 +127,27 @@ async def add_request_id_and_timing(request: Request, call_next):
     response = await call_next(request)
     
     # Calculate duration
-    duration_ms = int((time.time() - start_time) * 1000)
+    duration_seconds = time.time() - start_time
+    duration_ms = int(duration_seconds * 1000)
     
     # Add headers
     response.headers["X-Request-ID"] = request_id
     response.headers["X-Response-Time"] = f"{duration_ms}ms"
+
+    # Prometheus metrics (labeled by route *template*, e.g.
+    # "/leads/{lead_id}", never the raw path -- see
+    # core.observability.prometheus_metrics.route_template for why).
+    try:
+        path_label = prometheus_metrics.route_template(request)
+        prometheus_metrics.http_requests_total.labels(
+            method=request.method, path=path_label, status_code=str(response.status_code)
+        ).inc()
+        prometheus_metrics.http_request_duration_seconds.labels(
+            method=request.method, path=path_label
+        ).observe(duration_seconds)
+    except Exception:
+        # Metrics must never be able to break a real request.
+        logger.debug("Failed to record request metrics", exc_info=True)
     
     # Log request
     logger.info(
@@ -261,6 +282,24 @@ async def liveness_check():
     Returns 200 if service is alive (doesn't check dependencies)
     """
     return {"status": "alive"}
+
+
+@app.get("/metrics")
+async def metrics(db: Session = Depends(get_db)):
+    """
+    Prometheus scrape endpoint (SECTION 7 of the production-polish brief).
+    No auth by design -- this is standard practice for Prometheus targets
+    and matches how /health, /ready, /live are already exposed; put this
+    behind network-level access control (a private network / VPC, or an
+    IP allowlist at the reverse proxy) in production rather than
+    application-level auth, so Prometheus itself doesn't need credentials.
+    Contains only counts, durations, and status codes -- no customer
+    content of any kind.
+    """
+    from fastapi import Response
+
+    body, content_type = prometheus_metrics.render_latest(db)
+    return Response(content=body, media_type=content_type)
 
 
 if __name__ == "__main__":

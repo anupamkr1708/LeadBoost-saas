@@ -1,0 +1,118 @@
+# Development compose file.
+#
+# Run from the backend/ directory (where this file lives):
+#   docker compose up
+#
+# This mounts the source tree with hot-reload (--reload) so code changes
+# are picked up immediately, and starts only the services local
+# development actually needs day-to-day: Postgres and Redis. The full
+# monitoring/admin stack (pgAdmin, MinIO, Prometheus, Grafana) lives in
+# docker-compose.prod.yml, since you don't need dashboards to iterate on
+# a feature locally -- `docker compose -f docker-compose.prod.yml up` to
+# bring those up too when you specifically want to test them.
+#
+# Assumes a sibling ../frontend directory for the optional frontend
+# service (see the commented-out block below) -- this repo ships the
+# backend only, so uncomment it once a frontend project exists at that
+# path with its own Dockerfile.
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+       # use the builder stage in dev: no need for the
+      # Playwright/Chromium runtime install step on every rebuild when
+      # bind-mounting source anyway; swap to the default (runtime) target
+      # if you specifically need to test scraping locally in Docker.
+    command: >
+      sh -c "pip install --no-cache-dir -r requirements.txt >/dev/null 2>&1 || true &&
+             uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://leadboost:leadboost@postgres:5432/leadboost
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      ENVIRONMENT: development
+      SECRET_KEY: ${SECRET_KEY:-dev-only-secret-do-not-use-in-production}
+      ALLOWED_ORIGINS: http://localhost:5173,http://localhost:3000
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      SERPER_API_KEY: ${SERPER_API_KEY:-}
+      BRAVE_API_KEY: ${BRAVE_API_KEY:-}
+    volumes:
+      - .:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/live')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+    networks:
+      - leadboost
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: leadboost
+      POSTGRES_PASSWORD: leadboost
+      POSTGRES_DB: leadboost
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U leadboost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - leadboost
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - leadboost
+
+  # -- Uncomment once a frontend project exists at ../frontend ------------
+  # frontend:
+  #   build:
+  #     context: ../frontend
+  #     dockerfile: Dockerfile
+  #   command: npm run dev -- --host 0.0.0.0
+  #   ports:
+  #     - "5173:5173"
+  #   environment:
+  #     VITE_API_URL: http://localhost:8000
+  #   volumes:
+  #     - ../frontend:/app
+  #     - /app/node_modules
+  #   depends_on:
+  #     - backend
+  #   networks:
+  #     - leadboost
+
+networks:
+  leadboost:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
