@@ -84,4 +84,4 @@ def test_dynamic_route_params_never_appear_as_raw_path_labels(client, db_session
 
     r = client.get("/metrics")
     assert f"/leads/{lead.id}" not in r.text
-    assert '"/leads/{lead_id}"' in r.text
+    assert '"/api/v2/leads/{lead_id}"' in r.text
