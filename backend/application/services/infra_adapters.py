@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from core.domain.models.lead import AIDecisionLog, Lead, LeadEnrichmentLog, ScrapingLog
 from core.domain.models.organization import Organization
+from application.dto.models import CompanyIntelligenceOutput
 from core.domain.services.scoring import LeadScoringService, ScoreResult
 from core.infrastructure.billing.subscription_service import SubscriptionService
 from core.infrastructure.enrichment.enricher import EnrichmentResult, WaterfallEnricher
@@ -51,10 +52,18 @@ def enrich_lead(lead: Lead, scraped_data: Dict[str, Any]) -> Optional[Enrichment
 # -- Scoring -----------------------------------------------------------------
 
 
-def score_lead(lead: Lead) -> ScoreResult:
-    """Delegates to the existing deterministic LeadScoringService."""
+def score_lead(
+    lead: Lead, company_intelligence: Optional[CompanyIntelligenceOutput] = None
+) -> ScoreResult:
+    """Delegates to the existing deterministic LeadScoringService.
+
+    `company_intelligence` is forwarded through unchanged so the
+    industry_match criterion can use its icp_alignment_score (see
+    LeadScoringService._evaluate_industry_match) -- optional, so any
+    caller that only has a lead still works exactly as before.
+    """
     scoring_service = LeadScoringService()
-    return scoring_service.score_lead(lead)
+    return scoring_service.score_lead(lead, company_intelligence=company_intelligence)
 
 
 # -- Messaging (deterministic fallback path) ----------------------------------

@@ -12,6 +12,20 @@ import aiohttp
 import pytest
 
 from application.discovery.providers import http_utils
+
+
+@pytest.fixture(autouse=True)
+def _no_ambient_serper_key(monkeypatch):
+    """Guarantees SERPER_API_KEY is absent for every test in this module
+    unless a test explicitly sets it. Without this, a local .env leaking
+    the real key into os.environ (via load_dotenv() in main.py / database
+    / security, triggered by any earlier-imported test module in the same
+    pytest session) makes api_key=None silently resolve to a real key via
+    the os.getenv(...) fallback in SerperWebsiteResolver/SerperBusinessSearchProvider,
+    breaking the 'not configured' tests below in a way that has nothing to
+    do with the code under test."""
+    monkeypatch.delenv("SERPER_API_KEY", raising=False)
+
 from application.discovery.providers.serper_provider import (
     SerperBusinessSearchProvider,
     SerperWebsiteResolver,

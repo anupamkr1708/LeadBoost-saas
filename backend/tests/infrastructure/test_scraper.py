@@ -58,11 +58,26 @@ def test_looks_blocked_allows_normal_content():
 
 
 def test_parse_json_ld_extracts_flattened_fields(scraper):
+    """_parse_json_ld was replaced by a two-stage pipeline:
+    _extract_json_ld_blocks() returns raw schema.org blocks (this test),
+    and _semantic_from_jsonld_blocks() maps them into business fields
+    (see test_semantic_from_jsonld_blocks_maps_organization_fields)."""
     soup = BeautifulSoup(SAMPLE_HTML, "html.parser")
-    data = scraper._parse_json_ld(soup)
+    blocks = scraper._extract_json_ld_blocks(soup)
+    assert len(blocks) == 1
+    data = blocks[0]
     assert data["name"] == "Acme Robotics"
     assert data["email"] == "info@acme.com"
     assert data["foundingDate"] == "2015"
+
+
+def test_semantic_from_jsonld_blocks_maps_organization_fields(scraper):
+    soup = BeautifulSoup(SAMPLE_HTML, "html.parser")
+    blocks = scraper._extract_json_ld_blocks(soup)
+    semantic = scraper._semantic_from_jsonld_blocks(blocks)
+    assert semantic["org_name"] == "Acme Robotics"
+    assert semantic["description"] == "Industrial automation"
+    assert semantic["founded_year"] == 2015
 
 
 def test_parse_meta_extracts_title_and_og_tags(scraper):
@@ -83,24 +98,40 @@ def test_extract_contact_info_prefers_mailto_and_tel(scraper):
 
 def test_confidence_scores_are_bounded(scraper):
     soup = BeautifulSoup(SAMPLE_HTML, "html.parser")
-    json_ld = scraper._parse_json_ld(soup)
+    blocks = scraper._extract_json_ld_blocks(soup)
+    # Mirrors exactly how _parse_page() builds `jsonld_raw` -- the actual
+    # input _calculate_json_ld_confidence receives at runtime -- rather
+    # than the semantic dict, which uses different (renamed) keys.
+    jsonld_raw = {}
+    for block in blocks:
+        jsonld_raw.update(scraper._flatten_json(block))
     meta = scraper._parse_meta(soup, "https://acme.com")
-    assert 0.0 <= scraper._calculate_json_ld_confidence(json_ld) <= 1.0
+    assert 0.0 <= scraper._calculate_json_ld_confidence(jsonld_raw) <= 1.0
     assert 0.0 <= scraper._calculate_meta_confidence(meta) <= 1.0
 
 
 def test_pick_priority_subpages_filters_to_same_domain_and_keywords(scraper):
-    links = [
-        "https://acme.com/about",
-        "https://acme.com/contact",
-        "https://acme.com/blog/post-1",
-        "https://other-domain.com/about",
+    """_pick_priority_subpages(base_url, links) -> List[str] became
+    _discover_candidate_pages(base_url, anchors, sitemap_urls, max_pages)
+    -> List[(url, category)], scored via the weighted _PAGE_CATEGORIES
+    table instead of a flat keyword allow-list. max_pages=2 keeps only
+    the two highest-weighted categories here (about/contact, weight 1.0
+    each), which reproduces the original expectation that the
+    lower-weighted blog page and the cross-domain link don't survive."""
+    anchors = [
+        ("https://acme.com/about", "About Us"),
+        ("https://acme.com/contact", "Contact"),
+        ("https://acme.com/blog/post-1", "Blog Post"),
+        ("https://other-domain.com/about", "About"),
     ]
-    picked = scraper._pick_priority_subpages("https://acme.com", links)
-    assert "https://acme.com/about" in picked
-    assert "https://acme.com/contact" in picked
-    assert "https://other-domain.com/about" not in picked
-    assert "https://acme.com/blog/post-1" not in picked
+    picked = scraper._discover_candidate_pages(
+        "https://acme.com", anchors, sitemap_urls=[], max_pages=2
+    )
+    picked_urls = [url for url, _category in picked]
+    assert "https://acme.com/about" in picked_urls
+    assert "https://acme.com/contact" in picked_urls
+    assert "https://other-domain.com/about" not in picked_urls
+    assert "https://acme.com/blog/post-1" not in picked_urls
 
 
 def test_normalize_url_adds_scheme(scraper):

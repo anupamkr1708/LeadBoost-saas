@@ -338,10 +338,18 @@ class LeadPipelineNodes:
         pipeline_id = state.get("pipeline_id")
         errors = list(state.get("errors", []))
         timings = dict(state.get("stage_timings_ms", {}))
+        company_intelligence_dict = state.get("company_intelligence")
 
         async def _do(timer: StageTimer):
             lead = get_lead(self.db, lead_id)
-            result = await asyncio.to_thread(infra_adapters.score_lead, lead)
+            company_intelligence = (
+                CompanyIntelligenceOutput(**company_intelligence_dict)
+                if company_intelligence_dict
+                else None
+            )
+            result = await asyncio.to_thread(
+                infra_adapters.score_lead, lead, company_intelligence
+            )
             update_lead(
                 self.db,
                 lead_id,

@@ -49,6 +49,7 @@ import os
 import random
 import re
 import time
+from collections import Counter
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -201,6 +202,76 @@ def _looks_blocked(status: int, html: str) -> bool:
     return False
 
 
+_REPEATED_DIGIT_RUN_RE = re.compile(r"(\d)\1{4,}")  # same digit 5+ times in a row
+
+
+def _looks_like_valid_phone(raw: Optional[str]) -> bool:
+    """General, deterministic sanity check applied to any phone-shaped
+    value before it's trusted, regardless of which path produced it (tel:
+    link, JSON-LD telephone, or a free-text regex match). The free-text
+    phone regex used elsewhere in this module is intentionally permissive
+    (real phone formatting varies too much to be strict up front), which
+    means it can also match a version number, ratio, or other incidental
+    numeric text on the page (e.g. "5.6666666666"). Two shapes are almost
+    never a real phone number and are cheap to rule out generically, on
+    any site: a bare "digits.digits" decimal with no other formatting, and
+    a run of five or more identical digits."""
+    if not raw:
+        return False
+    raw = raw.strip()
+    if re.fullmatch(r"\d+\.\d+", raw):
+        return False
+    digits = re.sub(r"\D", "", raw)
+    if not (7 <= len(digits) <= 15):
+        return False
+    if _REPEATED_DIGIT_RUN_RE.search(digits):
+        return False
+    return True
+
+
+_WORD_RE = re.compile(r"[A-Za-z0-9']+")
+
+
+def _looks_like_placeholder_text(text: Optional[str]) -> bool:
+    """Deliberately keyword-free structural check for skeleton/loading-
+    placeholder content (e.g. a card grid whose real data hasn't hydrated
+    yet, repeating one short token many times), as opposed to real page
+    copy. No site, company, or industry-specific strings are matched here
+    -- only the shape of the text: genuine prose has varied vocabulary;
+    placeholder content is dominated by a small number of repeated tokens,
+    often the same token several times in a row. Generalizes to any page,
+    any language, any platform."""
+    words = _WORD_RE.findall(text or "")
+    if len(words) < 6:
+        return False  # too short to judge either way
+
+    counts = Counter(w.lower() for w in words)
+    _, most_common_count = counts.most_common(1)[0]
+    repetition_ratio = most_common_count / len(words)
+    # Real prose essentially never has one token accounting for >30% of all
+    # words AND appearing 3+ times; a repeated placeholder/loading token
+    # routinely does.
+    if repetition_ratio > 0.3 and most_common_count >= 3:
+        return True
+
+    # Complementary signal, independent of overall document length: the
+    # SAME token appearing several times in immediate succession. A longer
+    # page (extra nav labels, a promo banner, etc. surrounding the same
+    # placeholder grid) can dilute the ratio above below its threshold
+    # without the repeated run itself ever going away.
+    run_token, run_length = None, 0
+    for word in words:
+        word_lower = word.lower()
+        if word_lower == run_token:
+            run_length += 1
+        else:
+            run_token, run_length = word_lower, 1
+        if run_length >= 4:
+            return True
+
+    return False
+
+
 _STEALTH_INIT_SCRIPT = """
 Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
 Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
@@ -232,12 +303,12 @@ _EXTRACTION_JS = """
     const ogTitle = document.querySelector("meta[property='og:title']");
     result.og_title = ogTitle ? ogTitle.content : null;
 
-    result.jsonld = Array.from(
-        document.querySelectorAll("script[type='application/ld+json']")
-    ).map(s => {
-        try { return JSON.parse(s.innerText); }
-        catch (e) { return null; }
-    }).filter(Boolean);
+    // NOTE: JSON-LD is deliberately NOT collected here. _parse_page() (via
+    // _extract_json_ld_blocks) parses the same rendered HTML afterwards and
+    // is the single source of truth for jsonld/jsonld_raw across every
+    // tier -- see _scrape_with_playwright's merge, which takes those two
+    // keys from `parsed` unconditionally rather than gap-filling them from
+    // this script's output.
 
     result.text_content = (document.body ? document.body.innerText : "").slice(0, 10000);
 
@@ -281,7 +352,7 @@ _PAGE_CATEGORIES: Dict[str, Dict[str, Any]] = {
     "press": {"weight": 0.45, "keywords": ["press", "media", "news", "newsroom"]},
     "blog": {"weight": 0.25, "keywords": ["blog", "insights", "resources"]},
     "investor": {"weight": 0.35, "keywords": ["investor", "investors", "/ir", "ir/"]},
-    "locations": {"weight": 0.45, "keywords": ["locations", "offices", "office"]},
+    "locations": {"weight": 0.45, "keywords": ["locations", "offices", "office", "store-locator", "storelocator", "store-finder", "find-a-store", "find-us", "our-locations"]},
     "legal": {"weight": 0.15, "keywords": ["terms", "legal", "tos"]},
     "support": {"weight": 0.3, "keywords": ["support", "help", "helpdesk", "faq"]},
 }
@@ -305,6 +376,7 @@ _SOCIAL_DOMAIN_MAP: Dict[str, Tuple[str, ...]] = {
     "github_url": ("github.com",),
     "crunchbase_url": ("crunchbase.com",),
     "glassdoor_url": ("glassdoor.com",),
+    "pinterest_url": ("pinterest.com",),
 }
 
 _EMAIL_PREFIX_CATEGORIES: Dict[str, Tuple[str, ...]] = {
@@ -354,6 +426,48 @@ _ORG_SCHEMA_TYPES = {
 }
 _PRODUCT_SCHEMA_TYPES = {"product", "softwareapplication", "webapplication", "mobileapplication"}
 
+# Schema.org has dozens of Organization/LocalBusiness subtypes --
+# OnlineStore, Store, Restaurant, Hotel, ClothingStore, and many more --
+# and adds new ones over time. Matching JSON-LD blocks against a
+# hand-maintained allowlist of type NAMES (`_ORG_SCHEMA_TYPES` above) means
+# any subtype not already in that list silently falls through, and its
+# contactPoint/address/foundingDate never get extracted -- this is exactly
+# what happened with a real "OnlineStore"-typed block, whose phone number
+# and address sat unextracted as raw flattened keys.
+#
+# `_looks_like_organization_block` fixes this generally: it keeps the fast
+# path for the well-known type names, but falls back to a structural
+# check -- does this block carry at least two organization-shaped
+# properties (address, contactPoint, sameAs, ...)? -- for anything else.
+# That generalizes to any current or future Organization subtype with zero
+# per-type maintenance. A short exclude-list guards against the few
+# schema types (Person, Place, Product, ...) that can coincidentally carry
+# one or two of the same property names without being the organization
+# itself.
+_NON_ORG_SCHEMA_TYPES = {
+    "product", "softwareapplication", "webapplication", "mobileapplication",
+    "person", "place", "postaladdress", "contactpoint", "offer",
+    "faqpage", "question", "answer", "breadcrumblist", "itemlist",
+    "website", "webpage", "article", "newsarticle", "blogposting",
+    "review", "aggregaterating", "event", "imageobject", "videoobject",
+    "searchaction",
+}
+_ORG_SIGNAL_PROPERTIES = {
+    "address", "contactpoint", "sameas", "telephone", "foundingdate",
+    "numberofemployees", "legalname", "location", "founders", "logo",
+}
+_ORG_SIGNAL_MIN_MATCHES = 2
+_MAX_LOCATIONS_PER_BLOCK = 25
+
+
+def _looks_like_organization_block(types: Set[str], block: Dict[str, Any]) -> bool:
+    if types & _NON_ORG_SCHEMA_TYPES:
+        return False
+    if types & _ORG_SCHEMA_TYPES:
+        return True
+    keys_lower = {str(k).lower() for k in block.keys()}
+    return len(keys_lower & _ORG_SIGNAL_PROPERTIES) >= _ORG_SIGNAL_MIN_MATCHES
+
 # Phrases that mark a string as a marketing headline rather than a company
 # name (e.g. "AI Masterclass 2026: On-demand workshops..."). Used both to
 # reject bad company_name candidates and to judge whether an enrichment
@@ -366,6 +480,45 @@ _PROMO_PATTERNS = re.compile(
     r"now available|coming soon|subscribe|new feature)\b",
     re.IGNORECASE,
 )
+
+# ---------------------------------------------------------------------------
+# Canonical-field confidence heuristics (deterministic, source-based -- never
+# machine-learned, never randomized). Each score reflects how authoritative
+# the underlying signal is: content the company itself authored in
+# structured schema.org markup outranks a value merely matched in free-form
+# page text, which in turn outranks a last-resort inference like a
+# domain-name guess. Centralizing the scale here (instead of scattering
+# magic numbers through the confidence functions) makes it easy to audit
+# and retune, and easy to explain to a caller: "this email scored 0.95
+# because it came from schema.org ContactPoint, not a footer mailto link."
+# ---------------------------------------------------------------------------
+_CONFIDENCE_JSONLD_STRUCTURED = 0.95  # explicit schema.org field: legalName, contactPoint, sameAs, PostalAddress
+_CONFIDENCE_OG_SITE_NAME = 0.85
+_CONFIDENCE_APPLICATION_NAME = 0.80
+_CONFIDENCE_SAME_DOMAIN_CONTACT = 0.75  # email's domain matches the site being scraped
+_CONFIDENCE_DESCRIPTION_STRUCTURED = 0.85
+_CONFIDENCE_SOCIAL_SAMEAS = 0.90  # social link corroborated by JSON-LD sameAs
+_CONFIDENCE_SOCIAL_ANCHOR_SCAN = 0.60  # social link found only via generic <a href> scan
+_CONFIDENCE_LOGO_ALT_TEXT = 0.60
+_CONFIDENCE_JSONLD_GENERIC_NAME = 0.65  # JSON-LD `name`, but from an untyped/non-Organization block
+_CONFIDENCE_TITLE_TAG = 0.55
+_CONFIDENCE_GENERIC_TEXT_MATCH = 0.55  # e.g. phone found via tel:/regex with no JSON-LD corroboration
+_CONFIDENCE_CROSS_DOMAIN_CONTACT = 0.50  # email present but on a different domain than the site
+_CONFIDENCE_DOMAIN_GUESS = 0.30
+
+# Maps `company_name_source` (set by `_extract_company_info`) to a
+# confidence score -- keeps the ranked fallback chain and its confidence
+# scoring defined in exactly one place each, rather than re-deriving "how
+# was this name found" from scratch during confidence calculation.
+_COMPANY_NAME_SOURCE_CONFIDENCE: Dict[str, float] = {
+    "jsonld_organization": _CONFIDENCE_JSONLD_STRUCTURED,
+    "og_site_name": _CONFIDENCE_OG_SITE_NAME,
+    "application_name": _CONFIDENCE_APPLICATION_NAME,
+    "jsonld_generic_name": _CONFIDENCE_JSONLD_GENERIC_NAME,
+    "logo_alt_text": _CONFIDENCE_LOGO_ALT_TEXT,
+    "title_tag": _CONFIDENCE_TITLE_TAG,
+    "domain_guess": _CONFIDENCE_DOMAIN_GUESS,
+}
 
 
 class _RobotsCache:
@@ -601,32 +754,55 @@ class TieredScraper:
         best = await self._fetch_and_extract_static(url)
         tiers_attempted.append(best.result.method.value)
 
-        if best.result.success and best.result.confidence > 0.7 and not best.blocked:
-            return self._finish(best.result, start_time, tiers_attempted, best.blocked)
+        if (
+            best.result.success
+            and best.result.confidence > 0.7
+            and not best.blocked
+            and not self._contact_info_thin(best.result.data)
+        ):
+            return self._finish(best.result, start_time, tiers_attempted, best.blocked, url)
 
         # Tier 3: curl_cffi TLS-impersonation fetch, when blocked or weak
         if best.blocked or best.result.confidence < 0.5:
+            logger.info(
+                f"Escalating to curl_cffi for {url}: "
+                f"blocked={best.blocked} confidence={best.result.confidence:.2f}"
+            )
             curl_outcome = await self._scrape_with_curl_cffi(url)
             tiers_attempted.append(ScrapingMethod.CURL_CFFI.value)
             if curl_outcome.result.confidence > best.result.confidence:
                 best = curl_outcome
-            if best.result.success and best.result.confidence > 0.65 and not best.blocked:
-                return self._finish(best.result, start_time, tiers_attempted, best.blocked)
+            if (
+                best.result.success
+                and best.result.confidence > 0.65
+                and not best.blocked
+                and not self._contact_info_thin(best.result.data)
+            ):
+                return self._finish(best.result, start_time, tiers_attempted, best.blocked, url)
 
         # Tier 4: Playwright headless rendering for JS-heavy sites
         if best.result.confidence < 0.65:
+            logger.info(f"Escalating to playwright for {url}: confidence={best.result.confidence:.2f}")
             pw_outcome = await self._scrape_with_playwright(url)
             tiers_attempted.append(ScrapingMethod.PLAYWRIGHT.value)
             if pw_outcome.result.confidence > best.result.confidence:
                 best = pw_outcome
 
-        # Tier 5: intelligent, budget-bounded, concurrent multi-page enrichment
+        # Tier 5: intelligent, budget-bounded, concurrent multi-page enrichment.
+        # Missing contact info overrides the confidence ceiling below: a page
+        # can carry a rich, complete Organization profile in JSON-LD
+        # (founders, office locations, product catalog, sameAs) and score
+        # high confidence purely on that completeness while still exposing
+        # zero email/phone/social -- e.g. only a support URL. Enrichment is
+        # the only way to find real contact info in that case, so it
+        # shouldn't be skipped just because confidence already looks high.
+        contact_missing = self._contact_info_thin(best.result.data) if best.result.data else True
         if (
             best.result.success
-            and best.result.confidence < 0.9
             and not best.blocked
-            and self._needs_enrichment(best.result.data)
+            and (contact_missing or (best.result.confidence < 0.9 and self._needs_enrichment(best.result.data)))
         ):
+            logger.info(f"Enriching {url} with subpages: confidence={best.result.confidence:.2f}")
             enriched = await self._enrich_from_subpages(url, best)
             if enriched is not None:
                 best = enriched
@@ -634,12 +810,13 @@ class TieredScraper:
 
         # Tier 6: last-resort synchronous fallback
         if not best.result.success or best.result.confidence < 0.2:
+            logger.info(f"Falling back to requests for {url}: success={best.result.success}")
             fallback = await self._scrape_with_requests_fallback(url)
             tiers_attempted.append(ScrapingMethod.REQUESTS.value)
             if fallback.result.confidence > best.result.confidence:
                 best = fallback
 
-        return self._finish(best.result, start_time, tiers_attempted, best.blocked)
+        return self._finish(best.result, start_time, tiers_attempted, best.blocked, url)
 
     # -- Tier 1/2: static fetch ---------------------------------------------
 
@@ -917,6 +1094,14 @@ class TieredScraper:
             if data.get("tel_phone"):
                 data.setdefault("phone", data["tel_phone"])
 
+            # jsonld/jsonld_raw always come from `parsed` (never from
+            # js_data): _parse_page's Python-side JSON-LD extraction is the
+            # single canonical implementation shared by every tier, so this
+            # guarantees identical JSON-LD structure regardless of which
+            # tier produced the result.
+            data.pop("jsonld", None)
+            data.pop("jsonld_raw", None)
+
             for k, v in parsed.items():
                 if v and not data.get(k):
                     data[k] = v
@@ -957,15 +1142,26 @@ class TieredScraper:
 
     # -- Tier 5: multi-page enrichment ---------------------------------------
 
-    def _needs_enrichment(self, data: Dict[str, Any]) -> bool:
-        contact_thin = not (
+    def _contact_info_thin(self, data: Dict[str, Any]) -> bool:
+        """True when there's no way to actually reach the company at all --
+        no email, no phone, no social profile. Exposed separately from
+        `_needs_enrichment` because callers may want to treat this
+        specific gap differently: a page can carry a rich, complete
+        Organization profile in JSON-LD (founders, office locations,
+        product catalog, sameAs) and still expose zero contact info (e.g.
+        only a support URL) -- overall confidence alone won't catch that,
+        since confidence rewards profile completeness, not contactability.
+        """
+        return not (
             data.get("email") or data.get("phone") or self._has_social_link(data)
         )
+
+    def _needs_enrichment(self, data: Dict[str, Any]) -> bool:
         company_fields = ("industry", "founded_year", "employee_count", "legal_name")
         company_thin = sum(1 for f in company_fields if data.get(f)) == 0
         description_len = len(str(data.get("description") or data.get("text_content") or ""))
         description_thin = description_len < 200
-        return contact_thin or company_thin or description_thin
+        return self._contact_info_thin(data) or company_thin or description_thin
 
     @staticmethod
     def _has_social_link(data: Dict[str, Any]) -> bool:
@@ -1045,10 +1241,21 @@ class TieredScraper:
                     # new one looks like a real name.
                     current = merged_data.get(k)
                     current_is_weak = not current or not self._looks_like_company_name(str(current))
+                    replaced = False
                     if current_is_weak and self._looks_like_company_name(str(v)):
                         merged_data[k] = v
+                        replaced = True
                     elif not current:
                         merged_data[k] = v
+                        replaced = True
+                    if replaced:
+                        # Keep the provenance label in lockstep with the
+                        # value it describes -- otherwise company_name_source
+                        # would keep pointing at the homepage's stale source
+                        # after a subpage's name won the merge.
+                        merged_data["company_name_source"] = page_data.get(
+                            "company_name_source", f"{category}_page"
+                        )
                     continue
                 if k == "description" and category == "about":
                     # Prefer an About page's summary over thin or clearly
@@ -1063,6 +1270,23 @@ class TieredScraper:
                     continue
                 if not merged_data.get(k):
                     merged_data[k] = v
+
+            if category == "about" and not page_data.get("description"):
+                # Very common case: the About page has no <meta
+                # name="description"> tag of its own -- the summary lives
+                # directly in the page's visible copy (text_content)
+                # instead. Don't silently keep a thin/promotional homepage
+                # description just because this page lacked a meta tag.
+                current_desc = merged_data.get("description")
+                if (
+                    not current_desc
+                    or len(str(current_desc)) < 80
+                    or self._reads_as_promotional(str(current_desc))
+                ):
+                    derived = self._derive_description_from_text(str(page_data.get("text_content") or ""))
+                    if derived:
+                        merged_data["description"] = derived
+
             cname = page_data.get("company_name")
             if cname:
                 corroborated_names.add(str(cname).strip().lower())
@@ -1349,8 +1573,19 @@ class TieredScraper:
                 data["name"] = semantic["org_name"]  # prefer the typed Organization name
 
         # Original, untouched contact extraction (email/phone/social priority
-        # order preserved exactly as before).
-        data.update(self._extract_contact_info(soup, html))
+        # order preserved exactly as before). NOTE: this used to be an
+        # unconditional `data.update(...)`, which meant a generic mailto/tel
+        # link or body-text regex match on THIS SAME page would silently
+        # clobber an `email`/`phone`/`*_url` value that JSON-LD had already
+        # supplied a few lines above -- backwards from the stated precedence
+        # (JSON-LD outranks generic page text). Gap-filling here instead
+        # means JSON-LD wins when present, and `_extract_contact_info`'s
+        # values still populate every field exactly as before whenever
+        # JSON-LD didn't already supply them -- so existing callers with no
+        # JSON-LD on the page see byte-identical output to before.
+        for k, v in self._extract_contact_info(soup, html).items():
+            if v and not data.get(k):
+                data[k] = v
 
         # New: categorized emails, extra social platforms, fax, address parts.
         extended_contact = self._extract_extended_contacts(soup, html)
@@ -1363,7 +1598,22 @@ class TieredScraper:
             if v and not data.get(k):
                 data[k] = v
 
+        # General sanity check on every phone-shaped field, regardless of
+        # which path supplied it (tel: link, JSON-LD telephone, or the
+        # free-text regex fallback in `_extract_contact_info` -- the one
+        # actually at risk of a false positive like a version number).
+        for phone_key in ("phone", "fax", "sales_phone", "support_phone", "press_phone", "billing_phone"):
+            if phone_key in data and not _looks_like_valid_phone(str(data[phone_key])):
+                del data[phone_key]
+
         data["text_content"] = self._extract_main_text(html, url)
+        if data["text_content"] and _looks_like_placeholder_text(data["text_content"]):
+            # New, additive key -- existing consumers reading `text_content`
+            # directly are unaffected. Downstream (normalizer/enrichment)
+            # can use this to skip text-derived inference on content that's
+            # very likely an unhydrated SPA shell or a loading/empty state
+            # rather than real page copy.
+            data["text_content_thin"] = True
         return data
 
     # -- Schema.org / JSON-LD -------------------------------------------------
@@ -1412,7 +1662,7 @@ class TieredScraper:
             else:
                 types = set()
 
-            if types & _ORG_SCHEMA_TYPES:
+            if _looks_like_organization_block(types, block):
                 if block.get("name") and not out.get("org_name"):
                     out["org_name"] = block["name"]
                 if block.get("legalName") and not out.get("legal_name"):
@@ -1449,6 +1699,33 @@ class TieredScraper:
                     cp_list = contact_points if isinstance(contact_points, list) else [contact_points]
                     for cp in cp_list:
                         self._classify_contact_point(cp, out)
+
+                # `location` is how multi-office companies (Stripe, most
+                # retail chains, ...) list every office/store as a Place
+                # with its own PostalAddress, distinct from the single
+                # top-level `address`. Previously this only ever survived
+                # as raw flattened keys (location_0_address_..., ...);
+                # surfacing it as a clean list is exactly what "Locations /
+                # Store Locator" support needs.
+                raw_locations = block.get("location")
+                if raw_locations:
+                    loc_list = raw_locations if isinstance(raw_locations, list) else [raw_locations]
+                    parsed_locations = []
+                    for loc in loc_list[:_MAX_LOCATIONS_PER_BLOCK]:
+                        if not isinstance(loc, dict):
+                            continue
+                        entry: Dict[str, Any] = {}
+                        if loc.get("name"):
+                            entry["name"] = loc["name"]
+                        loc_addr = loc.get("address")
+                        if loc_addr:
+                            entry.update(
+                                {k: v for k, v in self._parse_postal_address(loc_addr).items() if v}
+                            )
+                        if entry:
+                            parsed_locations.append(entry)
+                    if parsed_locations:
+                        out.setdefault("locations", []).extend(parsed_locations)
 
             if types & _PRODUCT_SCHEMA_TYPES:
                 name = block.get("name")
@@ -1564,6 +1841,8 @@ class TieredScraper:
             result["address"] = ", ".join(str(p) for p in parts)
         if city:
             result["city"] = city
+        if region:
+            result["state"] = region
         if country:
             result["country"] = country
         if postal:
@@ -1800,6 +2079,28 @@ class TieredScraper:
         return bool(_PROMO_PATTERNS.search(text or ""))
 
     @staticmethod
+    def _derive_description_from_text(text: str, max_len: int = 320) -> Optional[str]:
+        """Best-effort, deterministic fallback used only during About-page
+        merge: many About pages have no <meta name="description"> tag of
+        their own -- the summary lives directly in the visible copy instead.
+        Rather than leave the field empty (or keep a weaker/promotional
+        homepage description), take a sentence-bounded prefix of the page's
+        already-extracted main text. This never invents anything -- it's a
+        verbatim substring of text the site itself displays -- it just
+        finds a clean sentence boundary to cut on instead of truncating
+        mid-word."""
+        text = (text or "").strip()
+        if len(text) < 40:
+            return None
+        if len(text) <= max_len:
+            return text
+        window = text[:max_len]
+        sentence_ends = list(re.finditer(r"[.!?][\"'\)\]]?\s", window))
+        if sentence_ends:
+            return window[: sentence_ends[-1].end()].strip()
+        return window.rsplit(" ", 1)[0].strip() + "\u2026"
+
+    @staticmethod
     def _extract_logo_company_name(soup: BeautifulSoup) -> Optional[str]:
         """Some sites never expose an Organization name in JSON-LD/meta but
         do put it in the header logo's alt text (e.g. alt="Acme Corp logo").
@@ -1844,16 +2145,24 @@ class TieredScraper:
         # was fixed: it was reaching `company_name` via the unguarded `name`
         # key, not via `org_name`.
         candidate_name = existing_data.get("org_name")
+        candidate_source = "jsonld_organization" if candidate_name else None
         if not candidate_name:
             raw_name = existing_data.get("name")
             if raw_name and self._looks_like_company_name(str(raw_name)):
                 candidate_name = raw_name
+                candidate_source = "jsonld_generic_name"
         if not candidate_name:
-            candidate_name = (
-                existing_data.get("og_site_name")
-                or existing_data.get("application_name")
-                or self._extract_logo_company_name(soup)
-            )
+            if existing_data.get("og_site_name"):
+                candidate_name = existing_data["og_site_name"]
+                candidate_source = "og_site_name"
+            elif existing_data.get("application_name"):
+                candidate_name = existing_data["application_name"]
+                candidate_source = "application_name"
+            else:
+                logo_name = self._extract_logo_company_name(soup)
+                if logo_name:
+                    candidate_name = logo_name
+                    candidate_source = "logo_alt_text"
         if not candidate_name:
             og_title = existing_data.get("og_title")
             title = existing_data.get("title")
@@ -1863,11 +2172,14 @@ class TieredScraper:
                 cleaned = re.split(r"\s*[|\-\u2013]\s*", raw_title, maxsplit=1)[0].strip()
                 if self._looks_like_company_name(cleaned):
                     candidate_name = cleaned
+                    candidate_source = "title_tag"
                     break
         if not candidate_name and domain_root:
             candidate_name = domain_root.capitalize()
+            candidate_source = "domain_guess"
         if candidate_name:
             out["company_name"] = candidate_name
+            out["company_name_source"] = candidate_source
 
         if domain_root:
             out.setdefault("potential_company_name", domain_root)
@@ -1974,6 +2286,185 @@ class TieredScraper:
             return text[:8000]
         except Exception:
             return ""
+
+    # -- Canonical field normalization & confidence ---------------------------
+    #
+    # Called exactly once per `scrape()` call, in `_finish()`, on whichever
+    # tier's (or multi-page merge's) data ultimately won -- NOT inside
+    # `_parse_page`, which runs once per page fetched. Two reasons:
+    #   1. Correctness: `emails`/`phones`/`field_confidence` should reflect
+    #      everything discovered across every page that got merged in
+    #      (homepage + enriched subpages), not just whichever single page
+    #      happened to be parsed at the time.
+    #   2. Performance: this function does no HTML parsing and no new HTTP
+    #      requests -- it only aggregates/aliases keys `data` already has --
+    #      so computing it once at the end is strictly cheaper than
+    #      recomputing it after every page fetch.
+    #
+    # Every key this returns is new. Nothing already in `data` is ever
+    # renamed, removed, or overwritten, so existing callers reading the
+    # original field names (`email`, `phone`, `linkedin_url`, `founded_year`,
+    # `title`, `description`, ...) are completely unaffected.
+
+    @staticmethod
+    def _build_canonical_fields(data: Dict[str, Any], url: str) -> Dict[str, Any]:
+        """Derive normalized canonical fields (emails, phones, brand_name,
+        headquarters, social aliases, founding_year, website_title/
+        description) plus a deterministic, explainable per-field confidence
+        score, purely from what the pipeline already extracted."""
+        out: Dict[str, Any] = {}
+
+        jsonld_raw = data.get("jsonld_raw") or {}
+        # Flattened JSON-LD only ever contains scalar leaves once fully
+        # flattened, so this set is cheap and lets every corroboration
+        # check below ("did this value come from schema.org?") be a plain
+        # membership test instead of new parsing.
+        jsonld_values = {
+            str(v) for v in jsonld_raw.values() if isinstance(v, (str, int, float))
+        }
+        site_domain = urlparse(url).netloc.lower().replace("www.", "") if url else ""
+
+        # -- emails / phones: aggregate every categorized contact channel
+        # already found (across homepage + any enriched subpages) into one
+        # deduplicated list. This never drops a value just because another
+        # field also happens to carry it -- surfacing every distinct contact
+        # channel is the point of a flat list.
+        email_keys = (
+            "email", "sales_email", "support_email", "press_email",
+            "privacy_email", "careers_email", "contact_email", "billing_email",
+        )
+        seen_emails: Dict[str, str] = {}
+        for key in email_keys:
+            val = data.get(key)
+            if not val:
+                continue
+            normalized = str(val).strip().lower()
+            domain = normalized.rsplit("@", 1)[-1] if "@" in normalized else ""
+            if domain in _EXCLUDED_EMAIL_DOMAINS:
+                continue
+            seen_emails.setdefault(normalized, str(val).strip())
+        if seen_emails:
+            out["emails"] = list(seen_emails.values())
+
+        phone_keys = ("phone", "sales_phone", "support_phone", "press_phone", "billing_phone")
+        seen_phones: Dict[str, str] = {}
+        for key in phone_keys:
+            val = data.get(key)
+            if val:
+                digits_only = re.sub(r"\D", "", str(val))
+                if digits_only:
+                    seen_phones.setdefault(digits_only, str(val).strip())
+        if seen_phones:
+            out["phones"] = list(seen_phones.values())
+
+        # -- organization aliases (spec-preferred canonical names)
+        if data.get("company_name"):
+            out["brand_name"] = data["company_name"]
+        if data.get("founded_year"):
+            out["founding_year"] = data["founded_year"]
+        if data.get("title"):
+            out["website_title"] = data["title"]
+        if data.get("description"):
+            out["website_description"] = data["description"]
+
+        # -- headquarters: human-readable rollup of whatever address parts
+        # are available. Prefers the already-assembled `address` string;
+        # falls back to joining the parts directly if only some are present.
+        if data.get("address"):
+            out["headquarters"] = data["address"]
+        else:
+            hq_parts = [data.get(k) for k in ("city", "state", "country") if data.get(k)]
+            if hq_parts:
+                out["headquarters"] = ", ".join(dict.fromkeys(str(p) for p in hq_parts))
+
+        # -- social aliases: derived generically from the same domain map
+        # the rest of the pipeline uses for classification, so adding a new
+        # platform there (e.g. Pinterest) automatically gets a canonical,
+        # suffix-free alias here too, with no extra per-platform code.
+        for field_name in _SOCIAL_DOMAIN_MAP:
+            if data.get(field_name):
+                canonical_name = field_name[:-4] if field_name.endswith("_url") else field_name
+                out[canonical_name] = data[field_name]
+
+        # -- deterministic, explainable per-field confidence -----------------
+        confidence: Dict[str, float] = {}
+
+        email_value = data.get("email")
+        if email_value:
+            if str(email_value) in jsonld_values:
+                confidence["email"] = _CONFIDENCE_JSONLD_STRUCTURED
+            elif site_domain and str(email_value).lower().rsplit("@", 1)[-1] == site_domain:
+                confidence["email"] = _CONFIDENCE_SAME_DOMAIN_CONTACT
+            else:
+                confidence["email"] = _CONFIDENCE_CROSS_DOMAIN_CONTACT
+
+        if data.get("phone"):
+            confidence["phone"] = (
+                _CONFIDENCE_JSONLD_STRUCTURED
+                if str(data["phone"]) in jsonld_values
+                else _CONFIDENCE_GENERIC_TEXT_MATCH
+            )
+
+        if data.get("company_name"):
+            confidence["company_name"] = _COMPANY_NAME_SOURCE_CONFIDENCE.get(
+                data.get("company_name_source"), _CONFIDENCE_GENERIC_TEXT_MATCH
+            )
+
+        if data.get("legal_name"):
+            # legal_name is only ever populated from schema.org `legalName`
+            # (see `_semantic_from_jsonld_blocks`), so its presence alone
+            # implies the structured-data confidence tier.
+            confidence["legal_name"] = _CONFIDENCE_JSONLD_STRUCTURED
+
+        if data.get("description"):
+            confidence["description"] = (
+                _CONFIDENCE_DESCRIPTION_STRUCTURED
+                if str(data["description"]) in jsonld_values
+                else _CONFIDENCE_GENERIC_TEXT_MATCH
+            )
+
+        if data.get("address"):
+            # The only address source currently implemented is schema.org
+            # PostalAddress, so presence alone implies the structured tier.
+            # If a future revision adds free-text address matching, that
+            # code path should set its own (lower) confidence explicitly
+            # instead of relying on this default.
+            confidence["address"] = _CONFIDENCE_JSONLD_STRUCTURED
+
+        # founded_year/employee_count: check for the *source key*, not an
+        # exact value match -- founded_year stores only the extracted year
+        # (e.g. 2000) while JSON-LD's `foundingDate` is a full date string
+        # (e.g. "2000-05-14"), so the exact-value membership test used above
+        # for phone/description would miss genuine JSON-LD provenance here.
+        jsonld_keys_lower = {str(k).lower() for k in jsonld_raw.keys()}
+        if data.get("founded_year"):
+            confidence["founded_year"] = (
+                _CONFIDENCE_JSONLD_STRUCTURED
+                if "foundingdate" in jsonld_keys_lower
+                else _CONFIDENCE_GENERIC_TEXT_MATCH
+            )
+        if data.get("employee_count"):
+            confidence["employee_count"] = (
+                _CONFIDENCE_JSONLD_STRUCTURED
+                if "numberofemployees" in jsonld_keys_lower
+                else _CONFIDENCE_GENERIC_TEXT_MATCH
+            )
+
+        for field_name in _SOCIAL_DOMAIN_MAP:
+            value = data.get(field_name)
+            if not value:
+                continue
+            canonical_name = field_name[:-4] if field_name.endswith("_url") else field_name
+            confidence[canonical_name] = (
+                _CONFIDENCE_SOCIAL_SAMEAS
+                if str(value) in jsonld_values
+                else _CONFIDENCE_SOCIAL_ANCHOR_SCAN
+            )
+
+        if confidence:
+            out["field_confidence"] = confidence
+
+        return out
 
     # -- Shared parsing helpers ----------------------------------------------
 
@@ -2135,10 +2626,27 @@ class TieredScraper:
         start_time: float,
         tiers_attempted: List[str],
         blocked: bool,
+        url: str = "",
     ) -> ScrapingResult:
         result.processing_time = time.time() - start_time
         result.tiers_attempted = tiers_attempted
         result.blocked_detected = blocked or result.blocked_detected
+
+        if result.data:
+            canonical = TieredScraper._build_canonical_fields(result.data, url)
+            for k, v in canonical.items():
+                # Purely additive: every key here is new (emails, phones,
+                # brand_name, headquarters, field_confidence, social
+                # aliases, ...), so this can never clobber an existing key.
+                if v not in (None, "", [], {}) and k not in result.data:
+                    result.data[k] = v
+
+        logger.info(
+            f"Scrape finished: success={result.success} method={result.method} "
+            f"confidence={result.confidence:.2f} pages={result.pages_scraped} "
+            f"blocked={result.blocked_detected} tiers={','.join(tiers_attempted)} "
+            f"fields={len(result.data)}"
+        )
         return result
 
 

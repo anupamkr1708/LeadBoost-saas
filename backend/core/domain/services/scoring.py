@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from enum import Enum
 import json
 
+from application.dto.models import CompanyIntelligenceOutput
 from core.domain.models.lead import Lead
 from core.infrastructure.logging import get_logger
 
@@ -42,6 +43,16 @@ class LeadScoringService:
     """
 
     def __init__(self):
+        # Ordered so "distance" between bands is meaningful (see
+        # _evaluate_company_size) -- must match the band labels
+        # WaterfallEnricher._bucket_employee_count actually produces.
+        self.employee_band_order = ["1-10", "11-50", "51-200", "201-500", "500+"]
+        # Configurable, not hardcoded into the evaluation method itself:
+        # which bands are the ideal fit. Bands outside this range still
+        # earn partial credit based on how far they are from it, instead
+        # of the previous all-or-nothing membership check.
+        self.preferred_employee_bands = ["11-50", "51-200", "201-500"]
+
         # Default scoring configuration
         self.default_criteria = [
             ScoringCriteria(
@@ -89,10 +100,20 @@ class LeadScoringService:
         ]
 
     def score_lead(
-        self, lead: Lead, custom_criteria: Optional[List[ScoringCriteria]] = None
+        self,
+        lead: Lead,
+        custom_criteria: Optional[List[ScoringCriteria]] = None,
+        company_intelligence: Optional[CompanyIntelligenceOutput] = None,
     ) -> ScoreResult:
         """
-        Score a lead based on configurable criteria
+        Score a lead based on configurable criteria.
+
+        `company_intelligence` is the upstream Company Intelligence stage's
+        output (see application/agents/company_intelligence_agent.py). It is
+        optional and defaults to None so every existing caller keeps working
+        unmodified; when provided, the industry_match criterion uses it
+        instead of the previous hardcoded industry list (see
+        _evaluate_industry_match for why).
         """
         criteria = custom_criteria or self.default_criteria
 
@@ -100,7 +121,7 @@ class LeadScoringService:
         total_score = 0.0
 
         for criterion in criteria:
-            score = self._evaluate_criterion(lead, criterion)
+            score = self._evaluate_criterion(lead, criterion, company_intelligence)
             criteria_scores[criterion.name] = score
             total_score += score
 
@@ -122,12 +143,17 @@ class LeadScoringService:
             },
         )
 
-    def _evaluate_criterion(self, lead: Lead, criterion: ScoringCriteria) -> float:
+    def _evaluate_criterion(
+        self,
+        lead: Lead,
+        criterion: ScoringCriteria,
+        company_intelligence: Optional[CompanyIntelligenceOutput] = None,
+    ) -> float:
         """
         Evaluate a single scoring criterion
         """
         if criterion.name == "industry_match":
-            return self._evaluate_industry_match(lead, criterion)
+            return self._evaluate_industry_match(lead, criterion, company_intelligence)
         elif criterion.name == "company_size":
             return self._evaluate_company_size(lead, criterion)
         elif criterion.name == "email_quality":
@@ -142,41 +168,74 @@ class LeadScoringService:
             logger.warning(f"Unknown scoring criterion: {criterion.name}")
             return 0.0
 
-    def _evaluate_industry_match(self, lead: Lead, criterion: ScoringCriteria) -> float:
+    def _evaluate_industry_match(
+        self,
+        lead: Lead,
+        criterion: ScoringCriteria,
+        company_intelligence: Optional[CompanyIntelligenceOutput] = None,
+    ) -> float:
         """
-        Evaluate industry match criterion
-        """
-        preferred_industries = [
-            "Software",
-            "SaaS",
-            "Technology",
-            "Fintech",
-            "Healthcare",
-            "E-commerce",
-            "AI",
-            "Data",
-        ]
+        Evaluate ICP/industry fit using the Company Intelligence stage's
+        icp_alignment_score (application/dto/models.py -- an existing field,
+        already 0.0-1.0, already computed upstream) instead of matching
+        lead.industry against a hardcoded industry list.
 
-        if lead.industry and lead.industry in preferred_industries:
-            return criterion.max_score
-        return 0.0
+        That previous approach was checked against real enrichment output
+        and was silently broken, not just philosophically undesirable: the
+        upstream enrichment tier produces free-text industry values ("retail",
+        "financial services") which rarely match a fixed list of exact
+        strings ("E-commerce", "Fintech") even when the lead is a clear fit.
+        Reusing icp_alignment_score also gives continuous, partial-credit
+        scoring for free, rather than the previous all-or-nothing match.
+
+        Returns 0.0 (unknown, not "poor fit") when company_intelligence
+        hasn't been computed for this lead yet -- that stage runs earlier in
+        the pipeline (see application/graph/graph_nodes.py), so this should
+        only happen if scoring is invoked out of order or standalone.
+        """
+        if company_intelligence is None:
+            return 0.0
+        return criterion.max_score * company_intelligence.icp_alignment_score
 
     def _evaluate_company_size(self, lead: Lead, criterion: ScoringCriteria) -> float:
         """
-        Evaluate company size criterion
+        Evaluate company size criterion: full credit inside the configured
+        preferred range, decaying partial credit for each band of distance
+        outside it, rather than zero credit for every band not explicitly
+        listed. A real run against 26 live sites showed the previous
+        all-or-nothing check scoring 0 for 25/26 leads -- including large,
+        clearly legitimate organizations (500+ employees) that simply
+        weren't on the list -- which is a mis-score, not a conservative one.
         """
-        preferred_sizes = ["11-50", "51-200", "201-500"]
+        if not lead.employees or lead.employees not in self.employee_band_order:
+            return 0.0  # unknown band -- no evidence, not "poor fit"
 
-        if lead.employees and lead.employees in preferred_sizes:
+        band_index = self.employee_band_order.index(lead.employees)
+        preferred_indices = [self.employee_band_order.index(b) for b in self.preferred_employee_bands]
+        distance = min(abs(band_index - p) for p in preferred_indices)
+
+        if distance == 0:
             return criterion.max_score
-        return 0.0
+        # Each band of distance halves the credit; two or more bands away
+        # earns nothing, same floor as before for genuinely poor fits.
+        decay = 0.5 ** distance
+        return criterion.max_score * decay if distance == 1 else 0.0
 
     def _evaluate_email_quality(self, lead: Lead, criterion: ScoringCriteria) -> float:
         """
-        Evaluate email quality criterion
+        Evaluate contact quality. Prefers email_confidence (unchanged
+        behavior when an email exists). Falls back to crediting a known
+        phone number at a fixed moderate weight when there's no email --
+        phones have no confidence column on Lead to scale by, so this
+        mirrors the flat credit _prioritize_contact already gives a
+        phone-only contact upstream (see enricher.py), rather than scoring
+        the ~80% of real leads with no email at 0 regardless of whether
+        they published a phone number.
         """
         if lead.email_confidence >= criterion.threshold:
             return criterion.max_score * (lead.email_confidence / 1.0)
+        if not lead.email_confidence and getattr(lead, "phone", None):
+            return criterion.max_score * 0.5
         return 0.0
 
     def _evaluate_scrape_quality(self, lead: Lead, criterion: ScoringCriteria) -> float:

@@ -41,7 +41,7 @@ def test_render_returns_langchain_message_tuples():
         industry="Robotics",
         employees="11-50",
         about_text="We build robots.",
-        website_content="Robots for manufacturing.",
+        evidence_summary="Organization type: Company (confidence 0.90, source: json_ld)",
     )
     assert isinstance(messages, list)
     assert all(isinstance(m, tuple) and len(m) == 2 for m in messages)
