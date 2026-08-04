@@ -86,27 +86,47 @@ jobs:
           SECRET_KEY: "ci-test-secret-not-for-production-use-only"
           ENVIRONMENT: "development"
         run: |
-          pytest tests/ -v \
+          pytest tests/ discovery_eval/tests/ -v \
             --ignore=tests/scraper \
-            --deselect tests/infrastructure/test_scraper.py::test_parse_json_ld_extracts_flattened_fields \
-            --deselect tests/infrastructure/test_scraper.py::test_confidence_scores_are_bounded \
-            --deselect tests/infrastructure/test_scraper.py::test_pick_priority_subpages_filters_to_same_domain_and_keywords \
             --junitxml=test-results.xml
-          # The three deselected tests call private TieredScraper methods
-          # (_parse_json_ld, _pick_priority_subpages) that no longer exist
-          # under those names -- confirmed present, identically failing,
-          # in the repository *before* this production-polish pass began,
-          # i.e. pre-existing drift from an earlier scraper refactor, not
-          # a regression introduced here. The scraper itself is
-          # deliberately left untouched (already working, out of scope
-          # for this pass) and per SECTION 12 existing tests aren't
-          # rewritten either -- so these three are excluded by name,
-          # visibly, rather than silently. The other 7 tests in that file
-          # still run and pass. To properly resolve this (not done here):
-          # either update these three tests to call the current methods
-          # (_extract_json_ld_blocks / _discover_candidate_pages), whose
-          # signatures changed shape, not just name, or remove them if
-          # superseded by other coverage.
+          # tests/scraper/ is intentionally excluded, not deselected test
+          # by test: those files (test_orchestration.py, test_parsing.py,
+          # test_playwright.py) are standalone dev scripts left over from
+          # the scraper rewrite -- they execute via asyncio.run(...) at
+          # import time, use a global PASS/FAIL counter with print()
+          # instead of assert, and expect to be run directly with a
+          # scraper.py on sys.path (`import scraper as S`), not collected
+          # by pytest. They are not broken by anything in this pass; they
+          # were simply never pytest-shaped. Converting them into real
+          # pytest tests (or moving them beside scripts/test_scraper.py,
+          # which is the same style of standalone script) is future work,
+          # not done here.
+          #
+          # tests/infrastructure/test_scraper.py previously had 3 tests
+          # deselected here because _parse_json_ld/_pick_priority_subpages
+          # no longer existed under those names. Both are now rewritten
+          # against the current two-stage JSON-LD pipeline
+          # (_extract_json_ld_blocks/_semantic_from_jsonld_blocks) and the
+          # weighted _discover_candidate_pages ranking, and pass -- so
+          # nothing is deselected here anymore.
+          #
+          # discovery_eval/tests/ (Discovery Quality Refinement sprint) is
+          # added explicitly alongside tests/ -- pytest.ini's
+          # `testpaths = tests` only applies when pytest is invoked with
+          # no path argument, so it has no effect once a path is given
+          # here, and discovery_eval/ sits outside `tests/` by design (it
+          # is a standalone, importable evaluation package with its own
+          # README, not part of the test tree). Its tests
+          # (discovery_eval/tests/test_discovery_eval.py) are pure-logic
+          # unit tests for the eval harness itself (metrics aggregation,
+          # CSV/JSON/Markdown report generation, chart generation against
+          # matplotlib) using no-op duck-typed stubs -- see that file's own
+          # docstring -- so they need no DB, no network, and no provider
+          # API keys, unlike `discovery_eval.run_eval` itself (the actual
+          # benchmark harness), which is never invoked in CI: it makes
+          # live calls to the production Discovery pipeline's real search
+          # providers and is meant to be run manually/on demand by a
+          # developer with the relevant API keys set, not on every PR.
 
       - name: Upload test results
         if: always()
