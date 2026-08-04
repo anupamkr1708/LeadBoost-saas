@@ -43,11 +43,24 @@ async def get_json(
     headers: Optional[Dict[str, str]] = None,
     params: Optional[Dict[str, Any]] = None,
     timeout: int = 10,
+    session: Optional[aiohttp.ClientSession] = None,
 ) -> Dict[str, Any]:
     """GET a JSON endpoint with retry on transient failures. Raises
-    ProviderHTTPError on any non-200 response."""
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as session:
-        async with session.get(url, headers=headers, params=params) as response:
+    ProviderHTTPError on any non-200 response.
+
+    `session`, if given, is reused (H1: connection reuse instead of a
+    fresh TCP+TLS handshake per call) and is never closed here -- the
+    caller that owns it is responsible for its lifecycle. When omitted,
+    behavior is byte-identical to before: a session is opened for this
+    one call and closed immediately after."""
+    request_timeout = aiohttp.ClientTimeout(total=timeout)
+    if session is not None:
+        async with session.get(url, headers=headers, params=params, timeout=request_timeout) as response:
+            if response.status != 200:
+                raise ProviderHTTPError(response.status, f"{url} returned HTTP {response.status}")
+            return await response.json(content_type=None)
+    async with aiohttp.ClientSession(timeout=request_timeout) as owned_session:
+        async with owned_session.get(url, headers=headers, params=params) as response:
             if response.status != 200:
                 raise ProviderHTTPError(response.status, f"{url} returned HTTP {response.status}")
             return await response.json(content_type=None)
@@ -60,11 +73,19 @@ async def post_json(
     headers: Optional[Dict[str, str]] = None,
     json_body: Optional[Dict[str, Any]] = None,
     timeout: int = 10,
+    session: Optional[aiohttp.ClientSession] = None,
 ) -> Dict[str, Any]:
     """POST a JSON body with retry on transient failures. Raises
-    ProviderHTTPError on any non-200 response."""
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as session:
-        async with session.post(url, headers=headers, json=json_body) as response:
+    ProviderHTTPError on any non-200 response. See `get_json` for the
+    `session` reuse contract -- identical here."""
+    request_timeout = aiohttp.ClientTimeout(total=timeout)
+    if session is not None:
+        async with session.post(url, headers=headers, json=json_body, timeout=request_timeout) as response:
+            if response.status != 200:
+                raise ProviderHTTPError(response.status, f"{url} returned HTTP {response.status}")
+            return await response.json(content_type=None)
+    async with aiohttp.ClientSession(timeout=request_timeout) as owned_session:
+        async with owned_session.post(url, headers=headers, json=json_body) as response:
             if response.status != 200:
                 raise ProviderHTTPError(response.status, f"{url} returned HTTP {response.status}")
             return await response.json(content_type=None)

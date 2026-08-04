@@ -166,11 +166,35 @@ def build_overpass_query(
 class OverpassProvider(BusinessSearchProvider):
     name = "overpass"
 
-    def __init__(self, api_url: Optional[str] = None, timeout: int = 25):
+    def __init__(
+        self,
+        api_url: Optional[str] = None,
+        timeout: Optional[int] = None,
+        session: Optional[aiohttp.ClientSession] = None,
+    ):
         self.api_url = api_url or os.getenv(
             "OVERPASS_API_URL", "https://overpass-api.de/api/interpreter"
         )
-        self.timeout = timeout
+        # Latency hardening: two independent public Overpass instances
+        # (overpass-api.de, overpass.kumi.systems) were benchmarked live
+        # and both showed the same pattern -- clean, fast TLS/connection,
+        # then an inconsistent multi-second-to-timeout wait on the actual
+        # query response. The previous 25s timeout x 3 attempts meant a
+        # single query could burn 90+ seconds on Overpass alone before
+        # ever reaching the Serper fallback -- this lines up with the
+        # P99 (102s) seen in the 113-query benchmark. A "shops within
+        # 1km of a point" query takes well under a second on a healthy
+        # instance, so 25s was never buying correctness, only burning
+        # user-facing latency on an already-flaky free resource.
+        # Same precedence as api_url above: explicit constructor arg
+        # wins, then the env var, then this new default.
+        self.timeout = timeout if timeout is not None else int(
+            os.getenv("OVERPASS_TIMEOUT_SECONDS", "8")
+        )
+        # H1: connection reuse. Settable after construction too (not just
+        # at __init__) so DiscoveryService can wire in a lazily-created
+        # shared session -- see DiscoveryService._ensure_shared_session.
+        self.session = session
 
     async def search(self, category: str, location: str, limit: int) -> List[BusinessCandidate]:
         # Overpass returns unnamed/duplicate-ish POIs fairly often; over
@@ -254,12 +278,20 @@ class OverpassProvider(BusinessSearchProvider):
 
         return last_elements, last_location_used, last_tier
 
-    @with_retry(exceptions=(aiohttp.ClientError, TimeoutError), attempts=3, min_wait=1.0, max_wait=5.0)
+    @with_retry(exceptions=(aiohttp.ClientError, TimeoutError), attempts=2, min_wait=1.0, max_wait=3.0)
     async def _fetch_with_retry(self, query: str) -> list:
+        if self.session is not None:
+            async with self.session.post(
+                self.api_url, data=query, timeout=aiohttp.ClientTimeout(total=self.timeout)
+            ) as response:
+                if response.status != 200:
+                    raise aiohttp.ClientError(f"Overpass returned HTTP {response.status}")
+                payload = await response.json(content_type=None)
+                return payload.get("elements", [])
         async with aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=self.timeout)
-        ) as session:
-            async with session.post(self.api_url, data=query) as response:
+        ) as owned_session:
+            async with owned_session.post(self.api_url, data=query) as response:
                 if response.status != 200:
                     raise aiohttp.ClientError(f"Overpass returned HTTP {response.status}")
                 payload = await response.json(content_type=None)

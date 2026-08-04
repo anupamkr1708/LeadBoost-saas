@@ -7,9 +7,9 @@ merged into application/dto/models.py) because these are internal to the
 discovery pipeline's stages, not exchanged with AI agents.
 """
 
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ParsedQuery(BaseModel):
@@ -56,6 +56,23 @@ class DiscoveredBusiness(BaseModel):
     is_duplicate: bool = False
     duplicate_key: Optional[str] = None
     rank_score: float = 0.0
+    # Sprint 4 (Discovery Quality Refinement): the canonical
+    # application.discovery.digital_identity.VerifiedDigitalIdentity for
+    # this business, when the caller resolved it via
+    # WebsiteResolver.resolve_with_digital_identity() rather than plain
+    # resolve() -- see discovery_service.py's _resolve_and_validate and
+    # ranking.py's own module docstring. Optional and defaulted to None so
+    # every existing construction site (and any caller still using plain
+    # resolve()) keeps working unchanged; ranking.py falls back to
+    # recomputing from `candidate`/`resolution` directly whenever this is
+    # absent. Typed as `Any` (not the dataclass itself) because
+    # VerifiedDigitalIdentity is a plain dataclass, not a Pydantic model,
+    # and this field is never validated or serialized -- it is read once
+    # by ranking.py and discarded, exactly like `resolution` is read by
+    # duplicate_detector.py without ever being serialized out of this DTO.
+    identity: Optional[Any] = None
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class LeadCreationOutcome(BaseModel):
@@ -101,3 +118,11 @@ class DiscoveryResponse(BaseModel):
     businesses_found: int
     businesses: List[LeadCreationOutcome] = Field(default_factory=list)
     duration_ms: int = 0
+    # H4: run-level provider reliability / domain observation metrics --
+    # already computed by ProviderReliabilityRegistry.to_dict() /
+    # DomainObservationRegistry.to_dict() (reliability.py, false_positive.py)
+    # but previously never surfaced past IdentityResolutionEngine, several
+    # layers deep. Optional and defaulted to None: every existing caller
+    # that doesn't read this field, and every existing serialization of a
+    # DiscoveryResponse, is unaffected.
+    provider_metrics: Optional[Dict[str, Any]] = None

@@ -22,6 +22,8 @@ tier. This class is left fully intact and still usable (constructor
 import os
 from typing import List, Optional
 
+import aiohttp
+
 from application.discovery.providers import http_utils
 from application.discovery.providers.base import WebsiteResolverProvider
 from application.discovery.website_validator import domain_of, is_rejected_domain
@@ -47,10 +49,17 @@ def _looks_official(url: str, business_name: str) -> bool:
 class BraveWebsiteResolver(WebsiteResolverProvider):
     name = "brave"
 
-    def __init__(self, api_key: Optional[str] = None, timeout: int = 10):
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        timeout: int = 10,
+        session: Optional[aiohttp.ClientSession] = None,
+    ):
         self.api_key = api_key if api_key is not None else os.getenv("BRAVE_API_KEY")
         self.timeout = timeout
         self._warned_missing_key = False
+        # H1: connection reuse -- see DiscoveryService._ensure_shared_session.
+        self.session = session
 
     def is_configured(self) -> bool:
         return bool(self.api_key)
@@ -108,6 +117,7 @@ class BraveWebsiteResolver(WebsiteResolverProvider):
             "X-Subscription-Token": self.api_key,
         }
         payload = await http_utils.get_json(
-            url, headers=headers, params={"q": query, "count": 5}, timeout=self.timeout
+            url, headers=headers, params={"q": query, "count": 5}, timeout=self.timeout,
+            session=self.session,
         )
         return (payload.get("web") or {}).get("results") or []

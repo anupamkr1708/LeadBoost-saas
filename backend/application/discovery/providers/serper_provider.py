@@ -48,6 +48,8 @@ import time
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
+import aiohttp
+
 from application.discovery import grounding
 from application.discovery.providers import http_utils
 from application.discovery.providers.base import BusinessSearchProvider, WebsiteResolverProvider
@@ -222,10 +224,17 @@ def _score_result(
 class SerperWebsiteResolver(WebsiteResolverProvider):
     name = "serper"
 
-    def __init__(self, api_key: Optional[str] = None, timeout: int = 10):
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        timeout: int = 10,
+        session: Optional[aiohttp.ClientSession] = None,
+    ):
         self.api_key = api_key if api_key is not None else os.getenv("SERPER_API_KEY")
         self.timeout = timeout
         self._warned_missing_key = False
+        # H1: connection reuse -- see DiscoveryService._ensure_shared_session.
+        self.session = session
 
     def is_configured(self) -> bool:
         return bool(self.api_key)
@@ -330,7 +339,8 @@ class SerperWebsiteResolver(WebsiteResolverProvider):
             "Content-Type": "application/json",
         }
         payload = await http_utils.post_json(
-            _SERPER_SEARCH_URL, headers=headers, json_body={"q": query}, timeout=self.timeout
+            _SERPER_SEARCH_URL, headers=headers, json_body={"q": query}, timeout=self.timeout,
+            session=self.session,
         )
         return payload.get("organic") or []
 
@@ -380,10 +390,17 @@ class SerperBusinessSearchProvider(BusinessSearchProvider):
 
     name = "serper_business_search"
 
-    def __init__(self, api_key: Optional[str] = None, timeout: int = 10):
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        timeout: int = 10,
+        session: Optional[aiohttp.ClientSession] = None,
+    ):
         self.api_key = api_key if api_key is not None else os.getenv("SERPER_API_KEY")
         self.timeout = timeout
         self._warned_missing_key = False
+        # H1: connection reuse -- see DiscoveryService._ensure_shared_session.
+        self.session = session
 
     def is_configured(self) -> bool:
         return bool(self.api_key)
@@ -405,6 +422,7 @@ class SerperBusinessSearchProvider(BusinessSearchProvider):
                 headers={"X-API-KEY": self.api_key, "Content-Type": "application/json"},
                 json_body={"q": query, "num": max(limit * 2, 10)},
                 timeout=self.timeout,
+                session=self.session,
             )
         except Exception as e:
             logger.warning(

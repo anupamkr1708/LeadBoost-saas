@@ -1,0 +1,512 @@
+query,business,selected_website,expected_website,correct,comments,confidence,identity_stability
+shoe stores in Mumbai,Buy Shoes Online in India,https://www.metroshoes.com/,,,,0.706,0.621
+shoe stores in Mumbai,Best Branded Shoe Stores In Colaba,https://lbb.in/mumbai/branded-shoe-stores-colaba/,,,,0.48,0.465
+shoe stores in Mumbai,"Explore Campus Shoes in Mumbai, Maharashtra",https://stores.campusshoes.com/maharashtra/mumbai,,,,0.688,0.575
+shoe stores in Mumbai,"Mochi Shoes Colaba, Mumbai",https://store.mochishoes.com/mochi-shoes-shoe-shop-mumbai-maharashtra-cbm,,,,0.686,0.575
+sports shops in Delhi,Lodhi Sports,https://lodhisport.com/?srsltid=AfmBOoprh7AfChqRW1yyQZAip1yYkXYtf5X3I7yQ9ue3KFDKKz_rkHMP,,,,0.706,0.621
+sports shops in Delhi,Best place to buy affordable sports items,https://www.reddit.com/r/delhi/comments/1eqlfch/best_place_to_buy_affordable_sports_items/,,,,0.48,0.465
+sports shops in Delhi,Sports Shop near me in Delhi,https://www.sportsuncle.com/sports-shop-in-delhi-ncr?srsltid=AfmBOoohl7lHuR8fx0nWxUfuaTKofpMc73vtx1mM_86jDrgSZQyIOeH8,,,,0.688,0.575
+sports shops in Delhi,"Best Sports Shops For All Your Sporting Needs I LBB, Delhi",https://lbb.in/delhi/sports-shops-in-delhi/,,,,0.48,0.465
+electronics stores in Bengaluru,Reddit,https://www.reddit.com/r/Bengaluru/comments/1ji5eax/which_electronics_stores_in_bengaluru_offers_the/,,,,0.73,0.584
+electronics stores in Bengaluru,Best Electronic Components Online Buy In Bangalore ...,https://sharvielectronics.com/?srsltid=AfmBOoos0RWuqV9f1rVY-rUA1GBjferRl30vOx8OIsbowhlAWqf2MD1m,,,,0.5,0.511
+electronics stores in Bengaluru,Online Electronic Shopping Store in India,https://www.reliancedigital.in/,,,,0.5,0.511
+electronics stores in Bengaluru,Croma,https://store.croma.com/croma-electronic-city-electronics-retail-and-repair-shop-electronic-city-bengaluru-263561/Home,,,,0.73,0.584
+electronics stores in Bengaluru,The Ultimate SP Road Bangalore Electronic Market Guide,https://lbb.in/bangalore/electronics-market-sp-road-nagarathpete-bangalore/,,,,0.48,0.465
+electronics stores in Bengaluru,Uniletstores,https://uniletstores.com/?srsltid=AfmBOooYRNJyIqxpgbtvnravL37gjWNrSqSk3S_92hPUJ5YCKYLWti8e,,,,0.75,0.629
+bookstores in Pune,Bookstore suggestions please!,https://www.reddit.com/r/pune/comments/1gjeinl/bookstore_suggestions_please/,,,,0.48,0.465
+bookstores in Pune,Ditch The Kindle And Shop At These Book Stores In Pune,https://lbb.in/pune/best-book-stores-in-pune/,,,,0.48,0.465
+bookstores in Pune,These Are The Best Book Stores In Pune!,https://www.whatshot.in/pune/best-book-stores-in-pune-c-21145,,,,0.48,0.465
+bookstores in Pune,Buy Books Online at the Best Price,https://pragationline.com/?srsltid=AfmBOootQZaH5ZRbSe4mGGdWJxWbbs8EqGLw926O_NN7hluh9bwtdaew,,,,0.705,0.621
+furniture stores in Hyderabad,Good furniture store in hyderabad,https://www.reddit.com/r/hyderabad/comments/15pppka/good_furniture_store_in_hyderabad/,,,,0.48,0.465
+furniture stores in Hyderabad,Furniture in Hyderabad,https://www.urbanladder.com/c/locations/furniture-in-hyderabad?srsltid=AfmBOorR5jWtqc2XZF8wXeDdVyZZsb44hlHWp5bOQctXbh0Kxjj1CWqg,,,,0.48,0.465
+furniture stores in Hyderabad,HomeTown: India's #1 Online Furniture Store,https://www.hometown.in/?srsltid=AfmBOoqPfQ0QnsauID0i0IJxIngtbIE604ciit0pe054f47sxIW2CpVz,,,,1.0,0.714
+furniture stores in Hyderabad,Anu Furniture: Furniture Store in Hyderabad & Bengaluru,https://www.anufurnitures.com/?srsltid=AfmBOooA49TtXATdUs0J45BUDdA7qUZjrz3nnM9H7EahvbibskoadQlx,,,,0.5,0.511
+top 10 mobile phone shops in Chennai,The Chennai Mobiles,https://www.thechennaimobiles.com/,,,,0.793,0.674
+top 10 mobile phone shops in Chennai,Explore the Best Selection of Mobile Phones Now at Poorvika,https://www.poorvika.com/mobiles/page,,,,0.73,0.584
+top 10 mobile phone shops in Chennai,Mobile Stores for Your Smartphone Needs in Chennai,https://chennai.idbf.in/mobile-stores,,,,0.555,0.564
+eye hospitals in Patna,"Best Eye Hospital in Kankarbagh, Patna",https://www.centreforsight.net/eye-hospitals-in-india/patna/kankarbagh,,,,0.48,0.465
+eye hospitals in Patna,Best Eye Hospital in Patna,https://asgeyehospital.com/hospital/city/patna/,,,,0.48,0.465
+eye hospitals in Patna,Navjyoti Superspeciality Eye Hospital,https://navjyotieyehospital.com/,,,,0.703,0.62
+eye hospitals in Patna,Sharp Sight,https://sharpsight.in/sharp-sight-eye-hospital-patna/,,,,0.73,0.584
+eye hospitals in Patna,Netravedam,https://netravedam.com/,,,,0.75,0.629
+eye hospitals in Patna,Best Eye Hospital in Patna,https://shreebalajinetralaya.co/,,,,0.5,0.511
+eye hospitals in Patna,"Sri Sai Eye Hospital, Patna",https://srisaieyehospital.com/,,,,0.5,0.511
+eye hospitals in Patna,Drishtipunj Eye hospital,https://www.drishtipunjeyehospital.com/,,,,0.711,0.622
+dentists in Jaipur,Thaper Dental Clinic: Best dental clinic in jaipur,https://thaperdentalclinic.com/,,,,0.7,0.619
+dentists in Jaipur,Best Dentist in Jaipur,https://mittaldentalclinic.com/,,,,0.5,0.511
+dentists in Jaipur,Best Dentist in Jaipur,https://marudhardentalclinic.com/,,,,0.5,0.511
+dentists in Jaipur,Best Dentist in Jaipur,https://ckbirlahospitals.com/rbh/doctors/dentist-in-jaipur,,,,0.48,0.465
+dentists in Jaipur,Jaipurdentalclinic,https://www.jaipurdentalclinic.com/,,,,0.825,0.681
+dentists in Jaipur,Best Dentist in Jaipur,https://drrenudentalclinic.com/,,,,0.5,0.511
+cardiology hospitals in Chennai,Best Cardiology Hospital in Chennai,https://mgmhealthcare.in/cardiac-sciences/overview/,,,,0.48,0.465
+cardiology hospitals in Chennai,"Best Cardiology Hospital in Chennai, Trichy ...",https://www.kauveryhospital.com/centers-of-excellence-and-specialties/cardiology/,,,,0.48,0.465
+cardiology hospitals in Chennai,Best Cardiology and Heart Hospital in India,https://www.apollohospitals.com/departments/heart,,,,0.48,0.465
+cardiology hospitals in Chennai,Heart Hospital In Chennai,https://prashanthhospitals.org/specialities/best-heart-hospital-in-chennai/,,,,0.48,0.465
+cardiology hospitals in Chennai,MIOT Institute of Cardiac Care,https://www.miotinternational.com/centers-of-excellence/miot-institute-of-cardiac-care/,,,,0.48,0.465
+cardiology hospitals in Chennai,Best Cardiology Hospital in Chennai,https://tambarammedicalcenter.com/best-cardiologist-in-chennai/,,,,0.48,0.465
+cardiology hospitals in Chennai,Medway Heart Institute,https://medwayhospitals.com/branches/medway-heart-institute-kodambakam/,,,,0.682,0.574
+physiotherapy clinics in Kochi,"Maana Spine, Joint & Wellness Clinic",https://maanahealth.com/maana-spine-joint-wellness-clinic-premier-care-in-kochi/,,,,0.684,0.575
+physiotherapy clinics in Kochi,Recommendations for good physiotherapy centers in Kochi,https://www.reddit.com/r/Kochi/comments/1qtsqz1/recommendations_for_good_physiotherapy_centers_in/,,,,0.48,0.465
+physiotherapy clinics in Kochi,Sports Physiotherapy Clinic in Kochi,https://wellmaxphysio.com/sports-injury-physiotherapy-clinic-kochi/,,,,0.48,0.465
+physiotherapy clinics in Kochi,Best Physiotherapist in Kochi,https://www.lourdeshospital.in/physiotherapy,,,,0.48,0.465
+physiotherapy clinics in Kochi,"Best Physiotherapy Hospital in Kochi, Kerala",https://www.manjummelhospital.com/departments/physiotherapy,,,,0.48,0.465
+physiotherapy clinics in Kochi,Cochin Physiocare,http://www.cochinphysiocare.com/,,,,0.72,0.584
+physiotherapy clinics in Kochi,KPMM Physiotherapy and Rehabilitation Centre,https://www.keralaphysiotherapy.com/,,,,0.713,0.622
+diagnostic centres in Lucknow,Diagnostic Centres in Lucknow,https://apollodiagnostics.in/find-nearest-centre/lucknow-3126,,,,0.48,0.465
+diagnostic centres in Lucknow,Best Diagnostic Centre in Lucknow,https://chandandiagnostic.com/,,,,0.71,0.621
+diagnostic centres in Lucknow,Welcome to Charak Diagnostics Centre,https://charakdiagnostic.com/,,,,0.702,0.62
+diagnostic centres in Lucknow,"Best Diagnostic Centre in Lucknow, Pathology Lab Near Me",https://redcliffelabs.com/lucknow,,,,0.48,0.465
+diagnostic centres in Lucknow,Mahi Diagnostics: HOME,https://www.mahidiagnostics.com/,,,,0.715,0.623
+diagnostic centres in Lucknow,List of Diagnostic Centres in Lucknow,https://www.medifee.com/dc-in-lucknow,,,,0.48,0.465
+diagnostic centres in Lucknow,Park Diagnostic Centre: Home,https://www.parkdiagnostic.com/,,,,0.714,0.623
+hospitals in Patna for eye treatment,Best Eye Hospital in Patna,https://asgeyehospital.com/hospital/city/patna/,,,,0.48,0.465
+hospitals in Patna for eye treatment,"Best Eye Hospital in Kankarbagh, Patna",https://www.centreforsight.net/eye-hospitals-in-india/patna/kankarbagh,,,,0.48,0.465
+hospitals in Patna for eye treatment,Navjyoti Superspeciality Eye Hospital,https://navjyotieyehospital.com/,,,,0.703,0.62
+hospitals in Patna for eye treatment,Sharp Sight,https://sharpsight.in/sharp-sight-eye-hospital-patna/,,,,0.73,0.584
+hospitals in Patna for eye treatment,"Sri Sai Eye Hospital, Patna",https://srisaieyehospital.com/,,,,0.5,0.511
+hospitals in Patna for eye treatment,Drishtipunj Eye hospital,https://www.drishtipunjeyehospital.com/,,,,0.711,0.622
+hospitals in Patna for eye treatment,Laxminetralaya,https://www.laxminetralaya.com/,,,,0.75,0.629
+hospitals in Patna for eye treatment,Best Eye Hospital in Patna,https://shreebalajinetralaya.co/,,,,0.5,0.511
+restaurants in Indore,Please suggest me best places to have Dinner in Indore,https://www.reddit.com/r/Indore/comments/1mqtike/please_suggest_me_best_places_to_have_dinner_in/,,,,0.48,0.465
+restaurants in Indore,Restaurants & Dining,https://www.marriott.com/en-us/hotels/idrmh-indore-marriott-hotel/dining/,,,,0.48,0.465
+restaurants in Indore,Travelandleisureasia,https://www.travelandleisureasia.com/sea/dining/food/the-best-places-to-eat-in-indore-sarafa-bazaar/,,,,0.73,0.584
+cafes in Gurgaon,What are your go to cafes in gurgaon?,https://www.reddit.com/r/gurgaon/comments/1je34ln/what_are_your_go_to_cafes_in_gurgaon/,,,,0.48,0.465
+pizza places in Noida,Best pizza place here?,https://www.reddit.com/r/noida/comments/1gurbfb/best_pizza_place_here/,,,,0.48,0.465
+pizza places in Noida,Order Pizza Near Me Noida,https://www.ovenstory.in/ovenstory/noida,,,,0.48,0.465
+bakeries in Surat,Find the Best Bakery Shop Cakes in Surat,https://theobroma.in/pages/theobroma-store-in-surat,,,,1.0,0.584
+bakeries in Surat,Atul Bakery: Best Bakery in Gujarat,https://atulbakery.com/,,,,0.5,0.511
+ice cream shops in Ahmedabad,Best Ice-cream place in Ahmedabad?,https://www.reddit.com/r/ahmedabad/comments/1coxdnn/best_icecream_place_in_ahmedabad/,,,,0.48,0.465
+best 15 restaurants near Mumbai Airport,Dining,https://csmia-mumbai.adaniairports.com/en/shop-and-dine/dining,,,,0.555,0.564
+best 15 restaurants near Mumbai Airport,Best Indian Food Options Inside the Airport?,https://www.reddit.com/r/mumbai/comments/1n19xez/78_hour_layover_at_mumbai_airport_bom_best_indian/,,,,0.48,0.465
+best 15 restaurants near Mumbai Airport,Restaurants & Bars,https://www.novotelmumbaiinternationalairport.com/restaurants-bars/,,,,0.555,0.564
+schools in Mysore,Best CBSE Schools in Mysore,https://dpsmysore.co.in/,,,,0.787,0.673
+schools in Mysore,Best schools in mysore,https://www.reddit.com/r/mysore/comments/1mmizv8/best_schools_in_mysore/,,,,0.48,0.465
+schools in Mysore,List of Best Schools in Mysore for Admission 2026-2027,https://www.edustoke.com/schools-in-mysore,,,,0.48,0.465
+schools in Mysore,Best School in Mysore,https://www.mysoreinternationalschool.com/,,,,0.771,0.67
+schools in Mysore,Welcome to MPS,https://www.mysorepublicschool.com/,,,,0.575,0.609
+engineering colleges in Bhopal,Bhopal Engineering Colleges List,https://www.scribd.com/doc/47166044/EC,,,,0.48,0.465
+engineering colleges in Bhopal,Best Engineering College in Bhopal,https://www.peoplesuniversity.edu.in/engineering-college-bhopal/,,,,0.48,0.465
+engineering colleges in Bhopal,Which is the best Engineering College in Bhopal?,https://www.sirtbhopal.ac.in/,,,,0.743,0.557
+engineering colleges in Bhopal,No 1 Engineering College In Bhopal,https://oriental.ac.in/oct-bhopal,,,,0.48,0.465
+coaching institutes in Kota,"ALLEN Career Institute, Kota– Best Coaching for NEET-UG ...",https://www.allen.ac.in/,,,,0.75,0.629
+coaching institutes in Kota,Best coaching in Kota,https://www.reddit.com/r/JEENEETards/comments/ollkr4/best_coaching_in_kota/,,,,0.48,0.465
+coaching institutes in Kota,IIT JEE Coaching in Kota,https://allen.in/kota/jee-main-advanced,,,,0.48,0.465
+coaching institutes in Kota,"Coaching Institute for IIT-JEE(Main & Advanced),Medical ...",https://www.resonance.ac.in/,,,,0.5,0.511
+coaching institutes in Kota,Bansal Classes,https://www.bansal.ac.in/,,,,0.75,0.629
+coaching institutes in Kota,"PW Vidyapeeth JEE, NEET & Foundation Coaching Centre ...",https://www.pw.live/offline-centres/batches/vidyapeeth/kota-rj/kota-vidyapeeth-072989,,,,0.48,0.465
+music schools in Kolkata,The Calcutta School of Music,https://www.calmusic.org/,,,,0.711,0.622
+music schools in Kolkata,MUSIC SCHOOL in KOLKATA,https://www.nsm-india.com/,,,,0.5,0.511
+music schools in Kolkata,NMAG India: Best Music School in Kolkata,https://www.nmagindia.com/,,,,0.708,0.621
+music schools in Kolkata,Academy for Musical Excellence (AMEC),https://www.amecindia.com/,,,,0.5,0.511
+music schools in Kolkata,Giti Alekhya: Best Music School for Adults & Learners,https://gitialekhya.in/,,,,0.711,0.622
+language institutes in Delhi,Oracleglobaleducation,https://www.oracleglobaleducation.com/,,,,0.75,0.629
+language institutes in Delhi,Lbb,https://lbb.in/delhi/foreign-language-institutes-delhi/,,,,0.48,0.465
+language institutes in Delhi,The Language SKOOL: Online Foreign Language Courses in ...,https://www.thelanguageskool.com/,,,,0.699,0.619
+language institutes in Delhi,Country,https://www.ilsc.com/language-schools/destinations/country/india,,,,0.48,0.465
+language institutes in Delhi,Cosmolingua: Best Foreign Language Institute in India,https://www.cosmolingua.in/,,,,0.75,0.629
+language institutes in Delhi,"Foreign Language Courses, Foreign Language Classes ...",https://www.langmainternational.com/,,,,0.5,0.511
+language institutes in Delhi,Part Time Language Courses,https://grs.du.ac.in/part-time-language-courses,,,,0.48,0.465
+green valley school Dehradun,The Green Valley Public School,https://greenvalleypth.com/,,,,0.646,0.562
+green valley school Dehradun,The Green Valley Public School,https://www.schoolsofdehradun.com/school/the-green-valley-public-school/,,,,0.555,0.564
+green valley school Dehradun,Eduminatti,https://www.eduminatti.com/schools/dehradun/the-green-valley-public-school-dehradun,,,,0.73,0.584
+green valley school Dehradun,"The Green Valley Public School (TGVPS), Selaqui, Dehradun",https://school.careers360.com/schools/the-green-valley-public-school-selaqui-dehradun,,,,0.48,0.465
+green valley school Dehradun,"The Green Valley Public School Dehradun, Selaqui ...",https://nacfun.com/a/the-green-valley-public-school-dehradun-selaqui-uttarakhand,,,,0.48,0.465
+software companies in Bengaluru,Bangalore Software Companies List,https://www.scribd.com/doc/218743495/List-of-Companies,,,,0.48,0.465
+software companies in Bengaluru,Techasoft: Enterprise AI & Software Development Company,https://www.techasoft.com/,,,,0.75,0.629
+software companies in Bengaluru,"AI-driven Software Development Company in Bangalore, India",https://www.nextbraintech.com/,,,,0.5,0.511
+AI startups in Hyderabad,AI (Artificial Intelligence) Startups funded by ...,https://www.ycombinator.com/companies/industry/ai/india,,,,0.48,0.465
+AI startups in Hyderabad,AI Development Company in Hyderabad,https://ahex.co/ai-development-company-in-hyderabad/,,,,0.48,0.465
+cybersecurity companies in Pune,"Top Pune, Maharashtra Cybersecurity Companies 2026",https://builtinpune.in/companies/type/cybersecurity-companies,,,,0.555,0.564
+cybersecurity companies in Pune,Cyber Security Services in Pune,https://threatsys.co.in/cyber-security-services-in-pune/,,,,0.48,0.465
+cybersecurity companies in Pune,ANA Cyber: Cybersecurity Services,https://www.anacyber.com/,,,,0.711,0.622
+IT consulting firms in Chennai,"List of consulting firms in Chennai, India",https://www.consultingcase101.com/list-of-consulting-firms-in-chennai-india/,,,,0.69,0.576
+IT consulting firms in Chennai,IT Consulting Company In Chennai,https://zerogravitytechnologies.com/it-consulting.html,,,,0.48,0.465
+IT consulting firms in Chennai,10 Consulting Companies in Chennai to Know,https://builtinchennai.in/articles/consulting-companies-in-chennai,,,,0.761,0.626
+IT consulting firms in Chennai,List of top Management Consulting companies in Chennai,https://www.naukri.com/management-consulting-companies-in-chennai-ind126l183,,,,0.48,0.465
+IT consulting firms in Chennai,Exxelo: Business Consultant in Chennai,https://exxelo.org/,,,,0.75,0.629
+IT consulting firms in Chennai,Thoughtworks: A leading technology consultancy ...,https://www.thoughtworks.com/,,,,0.75,0.629
+cloud consulting companies in Gurugram,Top Cloud Consulting Company in India,https://www.onedatasoftware.com/in/cloud-consulting-company-india,,,,0.48,0.465
+cloud consulting companies in Gurugram,Cloud Consulting Services,https://www.rishabhsoft.com/services/cloud-consulting,,,,0.48,0.465
+cloud consulting companies in Gurugram,CloudFence,https://www.cloudfence.ai/,,,,0.75,0.629
+cloud consulting companies in Gurugram,AWS Cloud Services Partner in India,https://www.consultedge.global/aws,,,,0.48,0.465
+pioneer technologies Hyderabad,Pioneer Technologies Inc,http://www.pioneertechinc.com/,,,,0.676,0.575
+pioneer technologies Hyderabad,PIONEER Technologies Corporation,https://www.uspioneer.com/,,,,0.717,0.623
+pioneer technologies Hyderabad,PioneerTech,https://pioneertech.com/,,,,0.75,0.629
+pioneer technologies Hyderabad,PIONEER TECHNOLOGIES PRIVATE LIMITED,https://www.pioneerit.in/,,,,0.665,0.569
+chartered accountants in Mumbai,CA in Mumbai,https://ndsavla.com/,,,,0.5,0.511
+chartered accountants in Mumbai,Mumbai Chartered Accountant Firms List,https://www.scribd.com/document/356143052/CA-FIRM-LIST-OF-MUMBAI,,,,0.48,0.465
+chartered accountants in Mumbai,Jain Anurag & Associates: Best Chartered Accountants in ...,https://jainanuragassociates.com/,,,,0.706,0.621
+chartered accountants in Mumbai,Chartered Accountant in Mumbai,https://www.msshahco.in/,,,,0.5,0.511
+chartered accountants in Mumbai,Trusted CA Firm in Mumbai,http://cajdshah.com/about-us.html,,,,0.45,0.406
+chartered accountants in Mumbai,"Best CA firms in Mumbai, Chartered Accountant Mumbai, India",https://www.asitmehtaassociates.com/,,,,0.5,0.511
+chartered accountants in Mumbai,Top CA Firm in India,https://kdpaccountants.com/,,,,0.5,0.511
+law firms in Delhi,India,https://www.legal500.com/c/india,,,,0.48,0.465
+law firms in Delhi,Khaitan & Co,https://www.khaitanco.com/,,,,0.717,0.623
+law firms in Delhi,A leading full-service corporate law firmKochhar & Co ...,https://kochhar.com/,,,,0.635,0.607
+law firms in Delhi,Singhania And Partners,https://singhania.in/,,,,0.75,0.629
+law firms in Delhi,Clasis Law,https://www.clasislaw.com/,,,,0.713,0.622
+law firms in Delhi,LexCounsel: Best Law Firm in Delhi,https://lexcounsel.in/,,,,0.75,0.629
+law firms in Delhi,ALG India Law Offices LLP: Home,https://www.algindia.com/,,,,0.711,0.622
+law firms in Delhi,"Jotwani Associates- Top Law Firm in Delhi, India",https://jotwani.com/,,,,0.75,0.629
+architects in Ahmedabad,"Best Interior Designer In Gujarat, Top Architects",https://prashantparmar.com/,,,,0.5,0.511
+architects in Ahmedabad,Smit Panchal Architects,https://www.smitpanchalarchitects.com/,,,,0.75,0.629
+architects in Ahmedabad,Unseen Architects: Architects in Ahmedabad,https://unseenarchitects.com/,,,,0.711,0.622
+architects in Ahmedabad,Architects,https://www.terrafirmaarchitects.com/,,,,0.706,0.621
+architects in Ahmedabad,Two Architects,https://www.twoarchitects.in/,,,,0.75,0.629
+architects in Ahmedabad,Vna,https://vna.works/,,,,0.5,0.511
+digital marketing agencies in Bengaluru,Digital Marketing Agency in Bangalore,https://www.digimarkagency.com/,,,,0.5,0.511
+digital marketing agencies in Bengaluru,TOP Professional Digital Marketing Companies in Bengaluru,https://agencies.semrush.com/list/bengaluru/,,,,0.48,0.465
+digital marketing agencies in Bengaluru,Innovkraft: Best Digital Marketing Company in Bangalore,https://innovkraft.com/,,,,0.75,0.629
+digital marketing agencies in Bengaluru,Reddit,https://www.reddit.com/r/writewingmedia/comments/1c62uop/top_digital_marketing_agencies_in_bangalore/,,,,0.73,0.584
+digital marketing agencies in Bengaluru,Digital Marketing Agency in Bangalore,https://welixdigital.com/,,,,0.655,0.566
+digital marketing agencies in Bengaluru,Digitalcorsel,https://digitalcorsel.com/,,,,0.75,0.629
+recruitment agencies in Pune,Recruitment Agency Pune,https://www.randstad.in/our-offices/recruitment-agency-pune_642/,,,,0.48,0.465
+recruitment agencies in Pune,Best Recruitment Agency in Pune,https://www.nlbservices.com/locations/recruitment-agency-in-pune,,,,0.48,0.465
+recruitment agencies in Pune,Need Recommendations for legit employment agency in ...,https://www.reddit.com/r/pune/comments/15e72nd/need_recommendations_for_legit_employment_agency/,,,,0.48,0.465
+recruitment agencies in Pune,Expert IT Staffing Companies In Pune,https://www.alliancerecruitmentagency.com/it-recruitment-pune/,,,,0.48,0.465
+recruitment agencies in Pune,Best Recruitment Agency in Pune,https://www.cielhr.com/recruitment-agencies-in-pune,,,,0.48,0.465
+recruitment agencies in Pune,7: Recruitment Agency in Pune,https://www.7consultancy.in/recruitment-agency-in-pune.php,,,,0.48,0.465
+recruitment agencies in Pune,Expert Recruitment Agency in Pune,https://group.teamlease.com/recruitment-agencies-in-pune/,,,,0.48,0.465
+recruitment agencies in Pune,Vaze Placement Services,https://www.vazeplacement.co.in/,,,,0.75,0.629
+recruitment agencies in Pune,Pune Placement Agencies Directory,https://www.scribd.com/document/81716961/List-of-Placement-Consultants-in-Pune,,,,0.48,0.465
+united traders Delhi,"united traders in ,Delhi",https://www.indiaonlinedirectory.com/united-traders,,,,0.48,0.465
+real estate developers in Noida,County Group: Top Real Estate Developers & Builders in ...,https://www.countygroup.in/,,,,0.708,0.621
+real estate developers in Noida,"Top Builders and Developers in Noida, Ghaziabad: Mahagun ...",https://www.mahagunindia.com/,,,,0.71,0.621
+real estate developers in Noida,Renox Group: Best Real Estate Developer in Noida Extension,https://www.renoxgroup.com/,,,,0.706,0.621
+real estate developers in Noida,Noida Builders Contact List PDF,https://www.scribd.com/document/54588134/Sumit-Builder-List-in-Noida,,,,0.48,0.465
+real estate developers in Noida,Prateek Group,https://prateekgroup.com/,,,,0.71,0.621
+real estate developers in Noida,"Top Developers in Noida, Uttar Pradesh",https://housing.com/builders/noida_uttar_pradesh-P2fqf0dypkiyhifgy,,,,1.0,0.584
+property consultants in Gurgaon,Search My Property,https://www.searchmyproperty.com/,,,,0.75,0.629
+property consultants in Gurgaon,YHATAW,https://www.yhataw.com/,,,,0.75,0.629
+property consultants in Gurgaon,Top Property Consultant & Real Estate Firm Gurgaon,https://moneytreerealty.com/top-real-estate-firm-in-gurgaon,,,,0.48,0.465
+property consultants in Gurgaon,Gurgaon Property Dealers Contact List,https://www.scribd.com/document/379468311/Gurgaon-Real-Estate-Agents,,,,0.48,0.465
+property consultants in Gurgaon,Moti Ahuja: Best Real Estate Consultant In Gurgaon,http://motiahuja.com/,,,,0.678,0.575
+property consultants in Gurgaon,Top Real Estate Consultant in Gurgaon,https://www.eliteedgelegacy.com/blog-details/top-real-estate-consultant-in-gurgaon,,,,0.48,0.465
+property consultants in Gurgaon,Gurgaon,https://cosmopolitanconsulting.com/delhi-ncr/gurgaon/,,,,0.48,0.465
+property consultants in Gurgaon,Best Property Consultant in Gurgaon,https://bestpropertyconsultant.com/,,,,0.705,0.621
+construction companies in Kochi,Top Construction Companies in Kochi,https://www.scribd.com/document/605955439/CONSTRUCTION-COMPANIES-IN-KOCHI-LIST,,,,0.48,0.465
+construction companies in Kochi,house builder in kochi,http://maadconcepts.com/civil-construction-company-kochi.php,,,,0.45,0.406
+construction companies in Kochi,KochiPlaza Constructions,https://www.kochiplaza.in/,,,,0.825,0.681
+construction companies in Kochi,"ABAD Builders: Builders and Developers in Kochi, Kerala",https://www.abadbuilders.com/,,,,0.713,0.622
+construction companies in Kochi,Best construction company in Kerala,https://sqgallery.com/,,,,0.5,0.511
+interior designers in Jaipur,Interior designers based in Jaipur,https://www.reddit.com/r/jaipur/comments/1isafgt/interior_designers_based_in_jaipur/,,,,0.48,0.465
+interior designers in Jaipur,Best Interior Designers in Jaipur for Home,https://www.livspace.com/in/interiors/jaipur,,,,0.48,0.465
+interior designers in Jaipur,24KT Interiors: Best Interior Designer In Jaipur,https://24ktinteriors.com/,,,,0.714,0.622
+interior designers in Jaipur,Interior Designer Jaipur,https://endlessinteriorsandconstruction.com/,,,,0.5,0.511
+interior designers in Jaipur,Interior Designers & House Decorators Near Jaipur,https://www.houzz.com/professionals/interior-designer/jaipur-24-in-probr0-bo~t_11785~r_1269515?fi=90,,,,0.48,0.465
+interior designers in Jaipur,Who are the best interior designers in Jaipur?,https://www.dehleezinterior.com/,,,,0.653,0.565
+coworking spaces in Hyderabad,Looking for budget-friendly co-working spaces in ...,https://www.reddit.com/r/hyderabad/comments/1qts4yv/looking_for_budgetfriendly_coworking_spaces_in/,,,,0.48,0.465
+coworking spaces in Hyderabad,Best Coworking Spaces in Hyderabad,https://cofynd.com/coworking/hyderabad,,,,0.48,0.465
+coworking spaces in Hyderabad,Office Spaces on Rent in Hyderabad,https://www.awfis.com/office-space/hyderabad,,,,0.48,0.465
+coworking spaces in Hyderabad,Co-Working Spaces at T-Hub,https://www.t-hub.co/co-working,,,,0.48,0.465
+coworking spaces in Hyderabad,Best Coworking Space in Hyderabad,https://www.cokarma.in/,,,,0.5,0.511
+coworking spaces in Hyderabad,Coworking Space in Hyderābād,https://www.regus.com/en/in/telangana/hyderabad/coworking,,,,0.48,0.465
+coworking spaces in Hyderabad,Best Coworking Space in Hyderabad,https://www.innov8.work/coworking-space/hyderabad/,,,,0.48,0.465
+coworking spaces in Hyderabad,Workspace in Hyderabad,https://wework.co.in/hyderabad/,,,,0.48,0.465
+textile manufacturers in Surat,Surat Textile Manufacturers Directory,https://www.scribd.com/document/514979898/From-Bionics-Enviro-Tech-bionicsenvirotech-gmail-com-ID-42618-88-Surat-Textile-Cluster-LIST,,,,0.48,0.465
+textile manufacturers in Surat,Surat Textile Market List: Wholesaler & Manufacturers ...,https://www.wholesalecatalogz.com/textile-directory/markets/surat-textile-market?srsltid=AfmBOop0lsURZ7e2DBFJu2rPoZK4Ut5IcWrMjxZG9_XJYs0z5M2BMexd,,,,0.48,0.465
+textile manufacturers in Surat,"Textile Company Surat, India For Rich Fabrics",https://www.surbhi.com/,,,,0.5,0.511
+textile manufacturers in Surat,The Textile Industry of Surat,https://www.fibre2fashion.com/industry-article/2150/the-textile-industry-of-surat,,,,0.48,0.465
+textile manufacturers in Surat,Udhna Textile Weaving Mills in Surat,https://www.udhnatextiles.com/,,,,0.702,0.62
+automobile suppliers in Pune,"Top Pune, Maharashtra Automotive Companies 2026",https://builtinpune.in/companies/type/automotive-companies,,,,0.555,0.564
+automobile suppliers in Pune,Pune Auto Hub: India's Key Automotive Manufacturing Base,https://www.stmpl.co.in/pune-auto-hub-india-automotive-manufacturing-vehicles-global-brands/,,,,0.48,0.465
+automobile suppliers in Pune,Auto Components Manufacturers in Pune,https://www.scribd.com/doc/291792185/Leads-of-Auto-Components-Manufacturers,,,,0.48,0.465
+automobile suppliers in Pune,Panoramaauto,https://www.panoramaauto.com/index.html,,,,0.73,0.584
+steel manufacturers in Jamshedpur,Tata Steel: Steel Supplier & Manufacturer in India,https://www.tatasteel.com/,,,,0.708,0.621
+steel manufacturers in Jamshedpur,AMALGAM STEEL,https://www.amalgamsteel.com/,,,,0.75,0.629
+steel manufacturers in Jamshedpur,Tata Steel Jamshedpur steel plant,https://www.gem.wiki/Tata_Steel_Jamshedpur_steel_plant,,,,0.48,0.465
+steel manufacturers in Jamshedpur,Industry Details,https://jsac.jharkhand.gov.in/pollution/IndustryDetail.aspx?XqIeZnkvql=ZxO7qTojl1bOr5zTeiXF+Eu4KIYhKiILCKjC/7G4kR+/FZ0Hr7dXsHLDkypQSMzxUijm4uJuc/FDMrNDE+aqEA==,,,,0.48,0.465
+chemical companies in Vadodara,Industry Leading Chemical Companies in Vadodara 2026,https://www.salezshark.com/top/chemicals-companies-in-vadodara,,,,0.48,0.465
+chemical companies in Vadodara,PCIPL: Global Chemical Manufacturing and Distribution ...,https://pciplindia.com/,,,,0.706,0.621
+chemical companies in Vadodara,Chemical companies in Vadodara,https://chemicalbusinessdirectory.com/asia/india/gujarat/vadodara/chemical-companies-in-vadodara/,,,,0.679,0.574
+chemical companies in Vadodara,Welcome To Simalin Chemicals Industries Limited,https://simalin.com/,,,,0.75,0.629
+chemical companies in Vadodara,Nandesari Chemical Companies List,https://www.scribd.com/document/783281714/CHEMICAL-INDUSTRIES-VADODRA,,,,0.48,0.465
+chemical companies in Vadodara,Imperial Oilfield Chemicals Pvt. Ltd.: Leading Oilfield ...,https://www.imperialchem.com/,,,,0.713,0.622
+plastic manufacturers in Rajkot,Member List,https://rajkotplastic.com/member-list/,,,,0.555,0.564
+plastic manufacturers in Rajkot,Rajkot plastic industries (Gujarat),https://www.sameeeksha.org/index.php?option=com_content&view=article&id=205&Itemid=499,,,,0.48,0.465
+plastic manufacturers in Rajkot,Plastic and Plastic Materials Manufacturers in Metoda ...,https://gidclodhika.com/plastic-and-plastic-materials-manufacturers,,,,0.48,0.465
+plastic manufacturers in Rajkot,"Crystal Polymers, Rajkot",https://www.dhartihouseware.com/,,,,0.5,0.511
+plastic manufacturers in Rajkot,Rio Industries,https://rioindustries.co.in/,,,,0.75,0.629
+industrial equipment suppliers in Faridabad,Industrial Equipment,http://www.bhartiheavyengineering.com/industrial-equipment.html,,,,0.45,0.406
+industrial equipment suppliers in Faridabad,"Best Industrial Equipment in Faridabad, Haryana",https://www.digiweblogic.com/listings/best-industrial-equipment-in-faridabad,,,,0.48,0.465
+industrial equipment suppliers in Faridabad,Company Directory for Faridabad,https://www.scribd.com/doc/19428919/Company-List-of-Faridabad,,,,0.48,0.465
+industrial equipment suppliers in Faridabad,Construction Equipment Manufacturers and Suppliers from ...,https://www.technofabindustries.co.in/construction-equipment.htm,,,,0.48,0.465
+hotels in Goa,Book Luxury Hotels & Resorts in Goa,https://www.tajhotels.com/en-in/destination/hotels-in-goa,,,,1.0,0.584
+hotels in Goa,The best hotels in Goa,https://www.cntraveller.in/gallery/the-best-hotels-in-goa-north-goa-south-goa-anjuna-candolim-panjim/,,,,0.48,0.465
+resorts in Udaipur,Raffles Udaipur,https://www.raffles.com/udaipur/,,,,0.73,0.584
+resorts in Udaipur,Luxury Resort in Udaipur,https://www.oberoihotels.com/hotels-in-udaipur-udaivilas-resort/,,,,0.48,0.465
+resorts in Udaipur,5 Star Hotel in Udaipur,https://www.anantahotels.com/ananta-hotels-udaipur/,,,,0.48,0.465
+resorts in Udaipur,The Best Resorts in Udaipur,https://www.skyscanner.co.in/sttc/px/captcha-v2/index.html?url=L2hvdGVscy9pbmRpYS91ZGFpcHVyLWhvdGVscy9jaS0yNzU0NzMxMC9yZXNvcnRzPw==&uuid=6972ffd6-8fbd-11f1-aa21-f4035763d0e3&vid=,,,,0.48,0.465
+travel agencies in Delhi,List of Registered Tour Operators,https://tourism.delhi.gov.in/tourism/list-registered-tour-operators,,,,0.555,0.564
+travel agencies in Delhi,Best Travel Agency in Delhi,https://kbstravels.com/,,,,0.5,0.511
+travel agencies in Delhi,Delhi Travel Agents Contact List,https://www.scribd.com/document/527837570/Travel-Agents-in-New-Delhi,,,,0.48,0.465
+travel agencies in Delhi,Southern Travels New Delhi,https://www.southerntravelsindia.com/brandstore.aspx-new-delhi,,,,0.682,0.574
+travel agencies in Delhi,Shivamtravels,https://www.shivamtravels.net/,,,,0.75,0.629
+travel agencies in Delhi,India Tour Operator,https://www.ghumindiaghum.com/,,,,0.5,0.511
+travel agencies in Delhi,share Travel Agent,https://nidhi.tourism.gov.in/home/directory?stateCode=&categoryCode=02&pageno=77,,,,0.48,0.465
+tour operators in Leh,"Leh Ladakh Tourism, Holidays Tours and Travels Packages",https://www.ladakhvacation.net/,,,,0.704,0.62
+tour operators in Leh,Exoticasiatravels,https://www.exoticasiatravels.com/,,,,0.75,0.629
+tour operators in Leh,Ladakh Adventure Holiday: Best Ladakh Tour Operator,https://www.ladakhadventureholiday.com/,,,,0.7,0.619
+tour operators in Leh,"Leh-Ladakh Sightseeing Tours (Nubra, Pangong, ...)",https://www.lehladakhtaxis.com/sightseeing-tours/,,,,0.555,0.564
+tour operators in Leh,Tour Operators in Leh Ladakh,https://www.swantour.com/india-tour-operators/leh-ladakh,,,,0.48,0.465
+homestays in Coorg,Looking for Homestay in Coorg,https://www.reddit.com/r/coorg/comments/1cya6r0/looking_for_homestay_in_coorg/,,,,0.48,0.465
+homestays in Coorg,CoorgHomestays.com,https://coorghomestays.com/,,,,0.825,0.681
+homestays in Coorg,Premium & Budget Homestays in Coorg,https://www.holidayincoorg.com/best-homestays-in-coorg,,,,0.756,0.625
+homestays in Coorg,The 9 most beautiful homestays in Coorg,https://www.cntraveller.in/story/beautiful-homestays-in-coorg/,,,,0.48,0.465
+homestays in Coorg,Best Places to stay in Coorg,https://www.thatgoangirl.com/best-places-to-stay-in-coorg/,,,,0.48,0.465
+homestays in Coorg,𝗕𝗼𝗼𝗸 𝗩𝗶𝗹𝗹𝗮𝘀 𝗜𝗻 𝗖𝗼𝗼𝗿𝗴,https://www.stayvista.com/karnataka/villas-in-coorg,,,,0.48,0.465
+homestays in Coorg,Homestay in Coorg,https://malnadstays.com/destinations/coorg/,,,,0.48,0.465
+homestays in Coorg,Homestay and Guest House in Coorg (Kodagu),https://www.cozycozy.com/en-in/coorg-homestay,,,,0.48,0.465
+top 5 hotels in Goa,Book Luxury Hotels & Resorts in Goa,https://www.tajhotels.com/en-in/destination/hotels-in-goa,,,,0.48,0.465
+top 5 hotels in Goa,The best hotels in Goa,https://www.cntraveller.in/gallery/the-best-hotels-in-goa-north-goa-south-goa-anjuna-candolim-panjim/,,,,0.48,0.465
+passport seva kendra in Lucknow,Regional Passport Office,https://www.passportindia.gov.in/psp/RPO/LucknowRPO,,,,0.691,0.576
+passport seva kendra in Lucknow,Passport Office in Lucknow,https://www.bankbazaar.com/passport/passport-office-lucknow.html,,,,0.48,0.465
+passport seva kendra in Lucknow,Passport Office in Lucknow,https://www.tataaig.com/travel-insurance/passport-office-in-lucknow,,,,0.48,0.465
+municipal corporation offices in Nagpur,Municipal Corporation,https://nagpur.gov.in/public-utility-category/municipal-corporation/,,,,0.555,0.564
+municipal corporation offices in Nagpur,NMC,https://www.nmcnagpur.gov.in/,,,,0.575,0.609
+municipal corporation offices in Nagpur,Nagpur Municipal Corporation (NMC) Contact No.,https://www.indiacustomercare.com/nagpur-municipal-corporation-contact-no,,,,0.48,0.465
+municipal corporation offices in Nagpur,Need contact details of the NMC (Nagpur Municipal ...,https://www.reddit.com/r/nagpur/comments/1jugohw/need_contact_details_of_the_nmc_nagpur_municipal/,,,,0.48,0.465
+municipal corporation offices in Nagpur,Nagpur Municipal Corporation Sataranjipura Zone Office ...,https://www.mappls.com/place-nagpur+municipal+corporation+sataranjipura+zone+office-marwadi+square-itwari+railway+station+road-nagpur-maharashtra-440002-H5Q15G@zdata=MjEuMTYyMDA5Kzc5LjExNjE2MSsxNytINVExNUcrKw==ed,,,,0.48,0.465
+municipal corporation offices in Nagpur,NMC,https://complainthub.org/nmc-nagpur/,,,,0.48,0.465
+regional transport office in Bhopal,"RTO Bhopal, Madhya Pradesh",https://www.rtoofficedetails.app/madhya-pradesh/bhopal,,,,0.48,0.465
+regional transport office in Bhopal,"RTO Bhopal (MP) Vehicle Registration Details, Office ...",https://www.policybazaar.com/rto/madhya-pradesh/bhopal/,,,,0.48,0.465
+regional transport office in Bhopal,Regional Transport Office in Bhopal,https://www.bhopalonline.in/guide/regional-transport-office-in-bhopal,,,,0.761,0.626
+regional transport office in Bhopal,"Regional Transport Office Bhopal, Kokta",https://www.mappls.com/86kop0,,,,0.48,0.465
+regional transport office in Bhopal,RTO Office Bhopal MP-04 Phone Number and Address,https://loconav.com/rto-offices/madhya-pradesh/bhopal-mp-04,,,,0.48,0.465
+district collector office in Patna,Collectorate,https://patna.nic.in/collectorate/,,,,0.555,0.564
+district collector office in Patna,Collectorate,https://tourism.bihar.gov.in/en/destinations/patna/collectorate,,,,0.48,0.465
+district collector office in Patna,Directory,https://patnadivision.bih.nic.in/directory/,,,,0.555,0.564
+banks in Chandigarh,AU Small Finance Bank Locator,https://locate.au.bank.in/location/chandigarh,,,,0.48,0.465
+banks in Chandigarh,The Chandigarh State Cooperative Bank Limited Chandigarh,https://cscbapex.bank.in/,,,,0.5,0.511
+banks in Chandigarh,Branch Overview in UT Chandigarh,https://www.scribd.com/document/867823055/BANK-WISE-DETAIL-OF-BRANCHES-IN-UT-CHANDIGARH-2021,,,,0.48,0.465
+banks in Chandigarh,HDFC Bank,https://www.hdfc.bank.in/branch-locator/chandigarh/chandigarh/hdfcbank-branch-chandigarh,,,,0.48,0.465
+banks in Chandigarh,CSB Bank Locator,https://branch.csb.bank.in/location/chandigarh/chandigarh,,,,0.48,0.465
+insurance agents in Indore,Insuranceagentindore,https://insuranceagentindore.com/,,,,0.825,0.681
+insurance agents in Indore,"Top General Insurance Distributors, Indore, Indore",https://www.advisorkhoj.com/Indore/General-Insurance-Advisor-%3Cnear%3E-Indore,,,,0.48,0.465
+insurance agents in Indore,"HDFC ERGO Insurance Agent: Nilesh Mittal, AB Road, Indore",https://agent.hdfcergo.com/hdfc-ergo-insurance-agent-nilesh-mittal-insurance-broker-ab-road-indore-433925/Home,,,,0.48,0.465
+insurance agents in Indore,List of all Insurance Agents in Indore (Madhya Pradesh),https://d7leadfinder.com/app/view-leads/56815543/,,,,0.48,0.465
+insurance agents in Indore,Best Insurance Agents in Indore,https://indore.idbf.in/insurance-agent,,,,0.555,0.564
+investment advisors in Mumbai,Investment Adviser,https://www.sebi.gov.in/sebiweb/other/OtherAction.do?doRecognisedFpi=yes&intmId=13,,,,0.48,0.465
+investment advisors in Mumbai,Waterfield Advisors,https://waterfieldadvisors.com/,,,,0.75,0.629
+investment advisors in Mumbai,Recommendations for registered Investment advisors,https://www.reddit.com/r/mumbai/comments/1ic6r6e/recommendations_for_registered_investment/,,,,0.48,0.465
+investment advisors in Mumbai,List of Flat Fee-Only Financial Planners & Investment ...,https://www.feeonlyindia.com/list-of-fee-only-planners,,,,0.48,0.465
+investment advisors in Mumbai,V R Wealth Advisors,https://www.vrwealthadvisors.com/,,,,0.72,0.624
+investment advisors in Mumbai,Members Directory,https://aria.org.in/members-directory/,,,,0.48,0.465
+investment advisors in Mumbai,How To Choose a Financial Advisor in Mumbai,https://hpprivatewealth.com/how-to-choose-a-financial-advisor-in-mumbai/,,,,0.48,0.465
+microfinance companies in Ranchi,Microfinance Jobs In Ranchi,https://www.naukri.com/microfinance-jobs-in-ranchi,,,,0.48,0.465
+microfinance companies in Ranchi,Microfinance Company in Jharkhand,https://www.chaitanyaindia.in/microfinance-company-in-jharkhand/,,,,0.48,0.465
+microfinance companies in Ranchi,Light expands operations in Jharkhand,https://www.lightfinance.com/light-expands-operations-in-jharkhand/,,,,0.683,0.574
+microfinance companies in Ranchi,Gangobira Microfinance,https://gnbmicrofinance.com/,,,,0.718,0.623
+microfinance companies in Ranchi,Ranchi Archives,https://fusionfin.com/job-type/ranchi/,,,,0.48,0.465
+NGOs in Bhubaneswar,"List of NGOs, Charities and Non-profits in Bhubaneswar",https://ngobase.org/ci/IN.OD.BH/bhubaneswar-ngos-charities,,,,0.48,0.465
+NGOs in Bhubaneswar,Niyatee Foundation,https://www.niyateefoundation.org/,,,,0.75,0.629
+NGOs in Bhubaneswar,NGOs in Health Sector,https://health.odisha.gov.in/en/health/citizen-information/ngos-in-health-sector,,,,0.48,0.465
+NGOs in Bhubaneswar,NGOs in Bhubaneswar,https://discover.give.do/city/Bhubaneswar/?page=2,,,,0.48,0.465
+NGOs in Bhubaneswar,WCSW,https://wcswodisha.org/,,,,0.5,0.511
+NGOs in Bhubaneswar,Best NGO in Bhubaneswar for Children,https://www.soschildrensvillages.in/sos-children-s-village-bhubaneswar/,,,,0.48,0.465
+child welfare organizations in Kolkata,SOS Children's Village: Best NGO in Kolkata,https://www.soschildrensvillages.in/sos-children-s-village-kolkata/,,,,0.48,0.465
+child welfare organizations in Kolkata,NGO in Kolkata,https://twfind.org/ngo-in-kolkata/,,,,0.48,0.465
+child welfare organizations in Kolkata,NGO Run Open Shelter,http://wbscps.in/User/ngo_os_list,,,,0.45,0.406
+child welfare organizations in Kolkata,Best NGO in Kolkata & India,https://nabatarafoundation.org/,,,,0.5,0.511
+child welfare organizations in Kolkata,Kolkata Child Welfare Organizations,https://www.scribd.com/document/964301223/List-of-Orphanage,,,,0.48,0.465
+child welfare organizations in Kolkata,Society for Indian Children's Welfare,https://www.sicwforchildren.org/,,,,0.708,0.621
+environmental NGOs in Dehradun,Top Environment Protection NGO in Dehradun,https://www.webpulsefoundation.org/dehradun/environment-protection.htm,,,,0.48,0.465
+environmental NGOs in Dehradun,Dehradun sustainability environmental services directory,https://earth5r.org/dehradun-sustainability-environmental-services-directory/,,,,0.48,0.465
+environmental NGOs in Dehradun,List of NGOs in Dehradun,https://ngobase.org/ci/IN.UK.DE/dehradun-ngos-charities,,,,0.48,0.465
+environmental NGOs in Dehradun,"Him Foundation Dehradun, NGO in Dehradun, Good NGO in ...",https://www.himfoundation.in/,,,,0.716,0.623
+old age homes in Coimbatore,Pavithramseniorliving,https://www.pavithramseniorliving.com/,,,,0.75,0.629
+old age homes in Coimbatore,Ananya's Nana Nani: Luxury Retirement Homes Coimbatore,https://nanananihomes.in/,,,,0.702,0.62
+old age homes in Coimbatore,Thatha Patti Elders Foundation: Best Old Age Home and ...,https://www.thathapatti.com/,,,,0.708,0.621
+old age homes in Coimbatore,Brindavan,https://www.seniorhomebrindavan.com/,,,,0.705,0.621
+old age homes in Coimbatore,Senior Citizen Homes in Coimbatore,https://www.vedaanta.com/senior-citizen-homes-in-coimbatore.html,,,,0.48,0.465
+old age homes in Coimbatore,Best Assisted Living in Coimbatore,https://www.athulyaseniorcare.com/location/coimbatore,,,,0.48,0.465
+old age homes in Coimbatore,HAPPY HOME,https://happyhometrust.org/,,,,0.712,0.622
+McDonald's outlets in Mumbai,McDonald's® India,https://mcdindia.com/,,,,0.711,0.622
+McDonald's outlets in Mumbai,Where is your favourite McDonald's in Mumbai?,https://www.reddit.com/r/mumbai/comments/1i43ql0/where_is_your_favourite_mcdonalds_in_mumbai/,,,,0.48,0.465
+McDonald's outlets in Mumbai,Order Food Online from Best McDonald's in,https://mcdelivery.co.in/restaurants/mumbai/146/order-food-online-in-mcdonalds-vaibhav-andherieast,,,,0.48,0.465
+McDonald's outlets in Mumbai,McDonald's,https://www.mcdonaldsindia.com/,,,,0.709,0.621
+Domino's Pizza in Bengaluru,Order Domino's Pizza Online,https://www.dominos.co.in/,,,,0.72,0.623
+Reliance Trends stores in Pune,Reliance Trends,https://relianceretail.com/reliance-trends.html,,,,0.689,0.575
+Reliance Trends stores in Pune,reliance trends,https://trends.shop/,,,,0.75,0.629
+Reliance Trends stores in Pune,"Reliance Trends: Shopping City One Mall, Pimpri",https://lbb.in/pune/trends-shopping-at-city-one-mall-pimpri/,,,,0.48,0.465
+Reliance Trends stores in Pune,Reliance Trends Stores in Pune,https://magicpin.in/Pune/Fashion/brands/7830/Reliance-Trends/?srsltid=AfmBOooTs1VuqKoN9uPmssHkaKf6TZKaVJhIkWc91a3mzi_Ca8vcecOx,,,,0.48,0.465
+Reliance Trends stores in Pune,Reliance Trends,https://storelocator.ril.com/reliancetrends/,,,,0.48,0.465
+Big Bazaar stores in Ahmedabad,Big Bazaar Ahmedabad,https://www.upto75.com/big-bazaar-Ahmedabad-offers/address-3108-phone,,,,0.48,0.465
+Big Bazaar stores in Ahmedabad,"Big Bazaar Shree Balaji Agora Mall, Ahmedabad",https://www.nearbuy.com/ahmedabad/big-bazaar-ahmedabad,,,,0.48,0.465
+Big Bazaar stores in Ahmedabad,"Big Bazaar, Gita Mandir, Ahmedabad",https://magicpin.in/Ahmedabad/Gita-Mandir/Grocery/Big-Bazaar/store/12cc82?srsltid=AfmBOoq-t4k13LnxealPm3SvVNtRfKHJ29QFRA86zO8Qc_Xt6b_h0xtj,,,,0.48,0.465
+Big Bazaar stores in Ahmedabad,Reliance SMART Bazaar Locator,https://stores.reliancesmartbazaar.com/location/gujarat/ahmedabad,,,,0.683,0.574
+Big Bazaar stores in Ahmedabad,"BIG BAZAAR, Ahmedabad",https://reliancesmartbazaar.com/,,,,0.644,0.561
+Big Bazaar stores in Ahmedabad,Big Bazaar Store Locations in India,https://www.scribd.com/document/614112809/Big-Bazaar-Stores-List,,,,0.48,0.465
+Sharma general store Kanpur,"Sharma general store, Lal Bangla, Kanpur",https://magicpin.in/Kanpur/Lal-Bangla/Grocery/Sharma-General-Store/store/20b2900?srsltid=AfmBOoqujWVSiXKjCnaaLXidwbIT3YIOJoV7yELM7ouSxoK2bikJbzBb,,,,0.48,0.465
+Sharma general store Kanpur,"Sharma PCO and General Store, Kidwai Nagar",https://www.mappls.com/f7x7e1,,,,0.48,0.465
+Sharma general store Kanpur,General Stores and Neighbourhood Shops in Kanpur,https://kanpur.idbf.in/general-store,,,,0.555,0.564
+Sunrise bakery Nashik,Sunrise Bakery,https://sunrisebakerycafe.com/,,,,0.703,0.62
+Sunrise bakery Nashik,Home,https://www.sunrise-bakery.com/,,,,0.5,0.511
+Prime cuts butcher Jodhpur,Premium Butcher Shop,https://www.plymouthprimemeats.com/products/,,,,0.48,0.465
+Om electricals Amritsar,Checkout,https://omelectricals.store/tobuy.html,,,,0.48,0.465
+Om electricals Amritsar,Welcome to Om Electricals,http://www.omelectricals.in/,,,,0.689,0.578
+Om electricals Amritsar,Our Projects,https://omelectricalsindia.in/Photo-Gallery.aspx,,,,0.48,0.465
+Om electricals Amritsar,OM ELECTRICALS POWER PRIVATE LIMITED,https://omelectricalspower.com/,,,,0.643,0.56
+Om electricals Amritsar,Om Electrical & Electronics,https://www.om-electricals.in/,,,,0.722,0.624
+City Xerox Aligarh,Top Photostat Shops in Aligarh,https://aligarh.idbf.in/photostat-xerox,,,,0.555,0.564
+regal shoes Mumbai,Regal,https://www.oberoimall.com/brands/regal,,,,0.48,0.465
+regal shoes Mumbai,Buy Regal Shoes Online in India at Best Price,https://www.myntra.com/regal-shoes,,,,0.48,0.465
+apollo Chennai,Top Multispecialty hospital in Chennai,https://www.apollohospitals.com/chennai,,,,0.48,0.465
+apollo Chennai,Apollo Hospitals Greams Road,https://www.apollo247.com/hospital/apollo-hospitals-greams-road-in-chennai-7fc430f1-249f-4440-81b4-9d0e3c4565f7,,,,0.693,0.576
+apollo Chennai,Apollo Hospital,https://chennai.nic.in/public-utility/apollo-hospital/,,,,0.555,0.564
+woodland Bangalore,Hotel Woodlands Bangalore,https://woodlands-hotel-bangalore.hotelsinbangalore.net/en/,,,,0.762,0.626
+woodland Bangalore,Explore the Outdoors with Woodland,https://www.woodlandworldwide.com/?srsltid=AfmBOooKm0Dk4lJafcUL7GxokYWT9SyRs2xLspiU_8A9hz3J0y05FlJ2,,,,0.705,0.621
+woodland Bangalore,Woodlands Hotel,https://www.woodlands.in/,,,,0.75,0.629
+woodland Bangalore,Visit Woodland Showroom in Bangalore,https://shop.woodlandworldwide.com/location/karnataka/bangalore,,,,0.628,0.512
+woodland Bangalore,Woodland Factory Outlet,https://lbb.in/bangalore/woodland-factory-outlet-dc032d/,,,,0.48,0.465
+classic furniture Jaipur,Jaipur Classic Style Hand Carved Dining Room Furniture,https://www.royalzig.com/jaipur-classic-style-hand-carved-dining-room-furniture,,,,0.48,0.465
+classic furniture Jaipur,Vintage Jaipur,https://vintagejaipur.com/,,,,0.825,0.681
+classic furniture Jaipur,Jcantiques,https://jcantiques.com/,,,,0.75,0.629
+national hospital Patna,Branch & Collection Center Details,https://nationaldiagnostics.org/branch-details/,,,,0.48,0.465
+national hospital Patna,Patna Medical College & Hospital,https://patnamedicalcollege.edu.in/,,,,0.575,0.609
+national hospital Patna,Hospital,https://patna.nic.in/public-utility-category/hospital/,,,,0.555,0.564
+national hospital Patna,"National Hospital, Pahari, Patna",https://magicpin.in/Patna/Pahari/Healthcare/National-Hospital/store/c89877?srsltid=AfmBOoqCbddbpdodjiEv7kIfdJNEHQ0U-2KYcS1L0l3Z6ehT7kBxrLNz,,,,0.48,0.465
+lotus clinic Lucknow,Lotus hospital,https://www.doctoriduniya.com/hospital/lucknow/lotus-hospital-lucknow?AspxAutoDetectCookieSupport=1,,,,0.48,0.465
+lotus clinic Lucknow,Lotus Hospital,https://v2archdesign.com/project-hospital/,,,,0.48,0.465
+lotus clinic Lucknow,Lotus hospital,https://www.bestdoctorforme.com/hospital/lucknow/lotus-hospital-lucknow,,,,0.48,0.465
+lotus clinic Lucknow,Top Multispeciality Hospital in Lucknow,https://www.apollohospitals.com/lucknow,,,,0.48,0.465
+lotus clinic Lucknow,"Lotus Hospital, Shekhpur, Lucknow",https://magicpin.in/Lucknow/Shekhpur/Healthcare/Lotus-Hospital/store/1b946a1?srsltid=AfmBOoqaoaeWh0o8uMSTgMIp5y4ulRAnSZ6kmQQAx9bWXGSp2wtHZIbs,,,,0.48,0.465
+modern bakery Pune,Hussenybakery,https://www.hussenybakery.com/,,,,0.75,0.629
+modern bakery Pune,"Modern Bakery, Nana Peth",https://www.mappls.com/place-modern+bakery-laxmi+road-nana+peth-pune-maharashtra-411002-F84E7T@zdata=MTguNTE1NTE2KzczLjg2ODg2OCsxNytGODRFN1QrKw==ed,,,,0.48,0.465
+star traders Rajkot,STAR TRADERS,https://gst.iadv.io/STAR-TRADERS-24ATHPK9715C1ZT/,,,,0.48,0.465
+star traders Rajkot,"Star Traders, Old Walled City, Rajkot",https://magicpin.in/Rajkot/Old-Walled-City/Grocery/Star-Traders/store/1274560?srsltid=AfmBOoocihUJA_PRAAUfKBk8ZPlKG-dzjxALkwHdIn8KUgGPV0J4M__d,,,,0.48,0.465
+royal enterprises Surat,Royalenterprise,https://royalenterprise.in/,,,,0.75,0.629
+software companies in Bombay,28 Software Companies in Mumbai to Know,https://builtinmumbai.in/articles/software-companies-in-mumbai,,,,0.685,0.575
+software companies in Bombay,Product based software companies in Mumbai,https://www.reddit.com/r/mumbai/comments/1ivg6fi/product_based_software_companies_in_mumbai/,,,,0.48,0.465
+software companies in Bombay,Mypcot Infotech: Best Software Development Company in ...,https://www.mypcot.com/,,,,0.75,0.629
+software companies in Bombay,Major Software Companies in Mumbai,https://www.scribd.com/doc/101646571/Software-Companies-in-Mumbai,,,,0.48,0.465
+hospitals in Madras,St. Charles Madras,https://stcharleshealthcare.org/locations/st-charles-madras,,,,0.48,0.465
+hospitals in Madras,Hospital Reporting Information,https://www.oregon.gov/oha/hpa/analytics/pages/hospital-details.aspx?View=%7B%7B2F47E5CB-E702-4D24-99C9-5D746709E8A0%7D%7D&SelectedID=56,,,,0.48,0.465
+hospitals in Madras,Saint Charles Madras (381324),https://www.ahd.com/free_profile/381324/Saint_Charles_Madras/Madras/Oregon/,,,,0.48,0.465
+hospitals in Madras,"772 Madras Hospital Stock Photos, High-Res Pictures, and ...",https://www.gettyimages.in/photos/madras-hospital,,,,0.48,0.465
+restaurants in Calcutta,Oh' Calcutta: Authentic Indian Restaurant in Winston-Salem,https://ohcalcuttaws.com/,,,,0.717,0.659
+restaurants in Calcutta,"Oh! Calcutta, Long Island City, NYC",https://ohcalcuttanyc.com/,,,,0.706,0.657
+restaurants in Calcutta,Best restaurants around Park Street/new town/ salt lake?,https://www.reddit.com/r/kolkata/comments/1i8q0mq/best_restaurants_around_park_streetnew_town_salt/,,,,0.48,0.465
+hotels in Poona,Conrad Pune,https://www.conradpune.com/,,,,0.703,0.546
+hotels in Poona,5-star Hotels in Pune,https://www.tajhotels.com/en-in/destination/hotels-in-pune,,,,0.48,0.465
+clinics in Trivandrum,K-Health Medical Centre: Best Health Clinic in Trivandrum,https://khealthplus.com/,,,,0.5,0.511
+clinics in Trivandrum,Best Clinics in Trivandrum,https://www.apolloclinic.com/clinic-locator/india/kerala/trivandrum,,,,0.48,0.465
+clinics in Trivandrum,Best Hospital in Trivandrum: Multi-speciality and Super ...,https://www.kimshealth.org/trivandrum/hospital/kimshealth-trivandrum,,,,0.48,0.465
+clinics in Trivandrum,Multispeciality Surgical Care Centre in Thiruvananthapuram,https://www.pristyncare.com/thiruvananthapuram/,,,,0.48,0.465
+clinics in Trivandrum,Pran Hospital,https://www.pranhospital.com/,,,,0.5,0.511
+clinics in Trivandrum,Clinics and Hospitals in Trivandrum,https://shopdoc.in/trivandrum/hospitals,,,,0.48,0.465
+clinics in Trivandrum,BEST HOSPITAL TRIVANDRUM IN CARDIOLOGY IVF ...,https://www.prshospital.com/,,,,0.5,0.511
+textile mills in Baroda,Vadodara Textile Manufacturers and suppliers,https://www.textileinfomedia.com/supplier/vadodara,,,,0.684,0.574
+textile mills in Baroda,"Find Textile Mills companies in Vadodara, Gujarat, India",https://historyofvadodara.in/federation-of-gujarat-industries/,,,,0.628,0.512
+textile mills in Baroda,SHREE WELTEX INDUSTRIES in Vadodara,https://www.shreeweltexindustries.in/,,,,0.705,0.621
+textile mills in Baroda,Which types of industries are surrounding Vadodara?,https://www.delighterp.com/which-types-of-industries-are-surrounding-vadodara,,,,0.48,0.465
+colleges in Allahabad,Colleges in Allahabad,https://www.shiksha.com/colleges/allahabad,,,,0.48,0.465
+colleges in Allahabad,Top Engineering Colleges in Greater Noida,https://www.united.ac.in/,,,,0.5,0.511
+colleges in Allahabad,Top Colleges in Allahabad,https://collegedunia.com/allahabad-colleges,,,,0.48,0.465
+colleges in Allahabad,Which college is the best in Allahabad?,https://cmpcollege.ac.in/,,,,0.661,0.568
+colleges in Allahabad,Affiliated colleges in prayagraj,https://www.careers360.com/question-affiliated-colleges-in-prayagraj,,,,0.48,0.465
+colleges in Allahabad,Top Government Degree Colleges in Allahabad,https://university.careers360.com/colleges/list-of-government-degree-colleges-in-allahabad,,,,0.48,0.465
+resorts in Pondicherry,Ocean Spray,https://www.oceanspray.in/,,,,0.75,0.629
+resorts in Pondicherry,Le Pondy,https://www.lepondy.com/,,,,0.75,0.629
+resorts in Pondicherry,The Best Resorts in Puducherry,https://www.skyscanner.co.in/sttc/px/captcha-v2/index.html?url=L2hvdGVscy9pbmRpYS9wdWR1Y2hlcnJ5LWhvdGVscy9jaS0yNzU0NjAwMy9yZXNvcnRzPw==&uuid=543c77c6-8fbe-11f1-bf69-771bf0c31374&vid=,,,,0.48,0.465
+resorts in Pondicherry,The Shore Trishvam,https://www.trishvam.com/the-shore-pondicherry/,,,,0.73,0.584
+restarants in Indore,Please suggest me best places to have Dinner in Indore,https://www.reddit.com/r/Indore/comments/1mqtike/please_suggest_me_best_places_to_have_dinner_in/,,,,0.48,0.465
+restarants in Indore,Restaurants and Cafes of Indore,https://uppercrustindia.com/v3/posts/1334/restaurants-and-cafes-of-indore,,,,0.48,0.465
+phsyiotherapy clinics in Kochi,Recommendations for good physiotherapy centers in Kochi,https://www.reddit.com/r/Kochi/comments/1qtsqz1/recommendations_for_good_physiotherapy_centers_in/,,,,0.48,0.465
+phsyiotherapy clinics in Kochi,"Maana Spine, Joint & Wellness Clinic",https://maanahealth.com/maana-spine-joint-wellness-clinic-premier-care-in-kochi/,,,,0.684,0.575
+phsyiotherapy clinics in Kochi,Sports Physiotherapy Clinic in Kochi,https://wellmaxphysio.com/sports-injury-physiotherapy-clinic-kochi/,,,,0.48,0.465
+phsyiotherapy clinics in Kochi,Best Physiotherapist in Kochi,https://www.lourdeshospital.in/physiotherapy,,,,0.48,0.465
+phsyiotherapy clinics in Kochi,"Best Physiotherapy Hospital in Kochi, Kerala",https://www.manjummelhospital.com/departments/physiotherapy,,,,0.48,0.465
+phsyiotherapy clinics in Kochi,Cochin Physiocare,http://www.cochinphysiocare.com/,,,,0.72,0.584
+phsyiotherapy clinics in Kochi,Best Physiotherapy Center in Kochi,https://www.loremwellnesscare.com/services/best-physiotherapy-services-in-kochi/,,,,0.48,0.465
+electroncis stores in Bengaluru,Reddit,https://www.reddit.com/r/Bengaluru/comments/1ji5eax/which_electronics_stores_in_bengaluru_offers_the/,,,,0.73,0.584
+electroncis stores in Bengaluru,Best Electronic Components Online Buy In Bangalore ...,https://sharvielectronics.com/?srsltid,,,,0.5,0.511
+electroncis stores in Bengaluru,Croma,https://store.croma.com/croma-electronic-city-electronics-retail-and-repair-shop-electronic-city-bengaluru-263561/Home,,,,0.73,0.584
+electroncis stores in Bengaluru,Online Electronic Shopping Store in India,https://www.reliancedigital.in/,,,,0.5,0.511
+electroncis stores in Bengaluru,The Ultimate SP Road Bangalore Electronic Market Guide,https://lbb.in/bangalore/electronics-market-sp-road-nagarathpete-bangalore/,,,,0.48,0.465
+electroncis stores in Bengaluru,Uniletstores,https://uniletstores.com/?srsltid,,,,0.75,0.629
+chartered accountnats in Mumbai,CA in Mumbai,https://ndsavla.com/,,,,0.5,0.511
+chartered accountnats in Mumbai,Mumbai Chartered Accountant Firms List,https://www.scribd.com/document/356143052/CA-FIRM-LIST-OF-MUMBAI,,,,0.48,0.465
+chartered accountnats in Mumbai,Jain Anurag & Associates: Best Chartered Accountants in ...,https://jainanuragassociates.com/,,,,0.706,0.621
+chartered accountnats in Mumbai,Chartered Accountant in Mumbai,https://www.msshahco.in/,,,,0.5,0.511
+chartered accountnats in Mumbai,Trusted CA Firm in Mumbai,http://cajdshah.com/about-us.html,,,,0.45,0.406
+chartered accountnats in Mumbai,"Best CA firms in Mumbai, Chartered Accountant Mumbai, India",https://www.asitmehtaassociates.com/,,,,0.5,0.511
+chartered accountnats in Mumbai,1259 Chartered Accountant Job Vacancies In Mumbai,https://www.naukri.com/chartered-accountant-jobs-in-mumbai,,,,0.48,0.465
+chartered accountnats in Mumbai,Chartered Accountant Manufacturers Suppliers Exporters ...,https://kdpaccountants.com/,,,,0.59,0.54
+enginering colleges in Bhopal,Bhopal Engineering Colleges List,https://www.scribd.com/doc/47166044/EC,,,,0.48,0.465
+enginering colleges in Bhopal,Best Engineering College in Bhopal,https://www.peoplesuniversity.edu.in/engineering-college-bhopal/,,,,0.48,0.465
+enginering colleges in Bhopal,No 1 Engineering College In Bhopal,https://oriental.ac.in/oct-bhopal,,,,0.48,0.465
+enginering colleges in Bhopal,"Best BTech Colleges in Bhopal: Fees, Admissions 2026, ...",https://www.shiksha.com/engineering/colleges/b-tech-colleges-bhopal,,,,0.48,0.465
+Noida software companies,Top Software Development Companies in Noida,https://www.topdevelopers.co/directory/software-development-companies-in-noida,,,,0.48,0.465
+Noida software companies,Companies to target in Noida,https://www.reddit.com/r/noida/comments/1rfhm1e/companies_to_target_in_noida/,,,,0.48,0.465
+Noida software companies,Noida Software Companies,https://www.scribd.com/document/553736445/Noida-Software-Companies-List-of-IT-Companies-in-Noida,,,,0.48,0.465
+Noida software companies,Heureux Software Solutions: Software Development Company,https://www.heureuxsoftware.com/,,,,0.708,0.621
+Noida software companies,Best IT company in Noida,https://www.shadowinfosystem.com/,,,,0.5,0.511
+Noida software companies,Leading Software Development & Testing Services,https://thinksys.com/,,,,0.5,0.511
+Dental clinics Bangalore,Eterna Dental Clinic,https://www.eternadental.com/,,,,0.706,0.621
+Dental clinics Bangalore,Best Dental Hospital in Bangalore,https://www.asterhospitals.in/hospitals/aster-cmi-bangalore/specialities/dentistry,,,,0.48,0.465
+Dental clinics Bangalore,Chisel Dental Clinic,https://www.chiseldental.co.in/,,,,0.706,0.621
+Dental clinics Bangalore,Best Dental Clinic in Bangalore,https://www.sakraworldhospital.com/sakra-specialities/dentistry/40,,,,0.48,0.465
+Dental clinics Bangalore,"Best Dental Clinics in Bangalore, India",https://www.dentavacation.com/clinics/dentists/india/bangalore/,,,,0.48,0.465
+Dental clinics Bangalore,Confident Dental Care,https://www.confidentdentalcare.in/,,,,0.705,0.621
+Dental clinics Bangalore,Manya Dental,https://manyadental.in/,,,,0.705,0.621
+Real estate agents Kolkata,NK Realtors: Best Real Estate Company in Kolkata,https://nkrealtors.com/,,,,0.718,0.623
+Real estate agents Kolkata,Anyone knows a real estate agent in Kolkata?,https://www.reddit.com/r/kolkata/comments/123s4m3/anyone_knows_a_real_estate_agent_in_kolkata/,,,,0.48,0.465
+Real estate agents Kolkata,Kolkata Real Estate Broker Directory,https://www.scribd.com/document/717312283/Kolkatta,,,,0.48,0.465
+Real estate agents Kolkata,"Real Estate Agent in Salt Lake City, Kolkata",https://www.saltlakebroker.in/,,,,0.5,0.511
+Real estate agents Kolkata,Pioneer Property,https://pioneerproperty.in/,,,,0.75,0.629
+Real estate agents Kolkata,Realtors & Estate Consultants Association Of Kolkata,https://www.recakol.com/individual.php,,,,0.48,0.465
+Warangal steel traders,Top Steel Dealers in Warangal,https://warangal.idbf.in/steels,,,,0.555,0.564
+Warangal steel traders,Nearest Dealers,https://www.nagarjunasteel.com/nearest-dealers,,,,0.48,0.465
+gyms near Delhi,Delhi Fitness Club: HOME,https://delhifitnessclub.org/,,,,0.774,0.671
+gyms near Delhi,Best Gyms In Delhi,https://www.cult.fit/lp/cult/center/gyms-in-delhi,,,,0.48,0.465
+gyms near Delhi,Find Gyms Near Me in Delhi,https://brocnbells.com/delhi/gym-finder,,,,0.48,0.465
+gyms near Delhi,Anytime Fitness,https://www.anytimefitness.com/en-in/locations/delhi-delhi-in-1082,,,,0.686,0.575
+gyms near Delhi,What are the best gyms in delhi?,https://www.reddit.com/r/delhi/comments/1t3egfh/what_are_the_best_gyms_in_delhi/,,,,0.48,0.465
+gyms near Delhi,"Find best Gyms, Yoga, Dance & Fitness Classes in Delhi",https://www.wtfgyms.com/gyms/best-gym-in-delhi,,,,0.48,0.465
+gyms near Delhi,"Best Gyms, Nutritionist & Fitness Studios in Delhi",https://fitpass.co.in/delhi?srsltid=AfmBOoor_q5uXgABedt8fktxV9Cs-tcQZwIUf0pO5Bnp0iw9CpkORVnz,,,,0.48,0.465
+coffee shops around Pune,Best coffee in Pune?,https://www.reddit.com/r/pune/comments/1km9rek/best_coffee_in_pune/,,,,0.48,0.465
+coffee shops around Pune,Know Where To Grab The Best Cup Of Coffee In Pune,https://lbb.in/pune/post/coffee/,,,,0.48,0.465
+law firms located in Chennai,Leading firms in India,https://www.legal500.com/c/india/city-focus-chennai/leading-firms,,,,0.48,0.465
+law firms located in Chennai,Leading law firm in Chennai,https://www.duaassociates.com/leading-law-firm-in-chennai/,,,,0.48,0.465
+law firms located in Chennai,Chennai,https://trilegal.com/offices/chennai/,,,,0.48,0.465
+law firms located in Chennai,Merlyn Law Firm: Law Firm In Chennai,https://merlynlawfirm.com/,,,,0.705,0.621
+law firms located in Chennai,"Corporate/Commercial: Chennai, India, Asia-Pacific",https://chambers.com/legal-rankings/corporate-commercial-chennai-india-8:3405:110:1?l=en-GB,,,,0.48,0.465
+law firms located in Chennai,"Top corporate lawyers by Leading Chennai law firm, IBC ...",https://www.amalaw.in/,,,,0.5,0.511
+law firms located in Chennai,Chennai,https://www.dentonslinklegal.com/en/office-details/chennai,,,,0.48,0.465
+law firms located in Chennai,Chennai Law Firm,https://www.indialawoffices.com/chennai.html,,,,0.48,0.465
+law firms located in Chennai,A leading full-service corporate law firmKochhar & Co ...,https://kochhar.com/,,,,0.635,0.607
+pharmacies close to Lucknow,Lucknow Pharmasave in Lucknow,http://www.lucknowpharmasave.com/,,,,0.754,0.627
+pharmacies close to Lucknow,Pharmasave Lucknow,https://pharmasave.com/store/lucknow/?srsltid=AfmBOorR7rkqLWtAWHdmr3LQkN7DCv4H6HT8yEq1qmNwOLKEIuYEkUBI,,,,0.73,0.584
+pharmacies close to Lucknow,Lucknow Medical Store Directory,https://www.scribd.com/document/809977399/lucknow-shop-contact-list,,,,0.48,0.465
+pharmacies close to Lucknow,PATEL NAGAR APOLLO PHARMACY Lucknow,https://www.apollopharmacy.in/medical-stores/lucknow/apollo_pharmacy_patel_nagar-11800?srsltid=AfmBOorWvjieGs8lsf9SL6qC_MwNe3JSz-x3ZczKVGK_Ml4pcK38Ca22,,,,0.683,0.574
+pharmacies close to Lucknow,"Pharmacies in Lucknow, Check Medicine Availability Now",https://localpill.com/lucknow/medicines,,,,0.48,0.465
+pharmacies close to Lucknow,List of all Pharmacies in Lucknow (Uttar Pradesh),https://d7leadfinder.com/app/view-leads/32844873/,,,,0.48,0.465
+I need software companies near Bangalore,Bangalore Software Companies List,https://www.scribd.com/doc/218743495/List-of-Companies,,,,0.48,0.465
+I need software companies near Bangalore,"AI-driven Software Development Company in Bangalore, India",https://www.nextbraintech.com/,,,,0.5,0.511
+I need software companies near Bangalore,Reddit,https://www.reddit.com/r/Bengaluru/comments/1jcs6b0/list_of_big_tech_companies_located_in_proper/,,,,0.73,0.584
+I need software companies near Bangalore,Techasoft: Enterprise AI & Software Development Company,https://www.techasoft.com/,,,,0.75,0.629
+Find me the best 10 gyms in Delhi,Delhi Fitness Club: HOME,https://delhifitnessclub.org/,,,,0.774,0.671
+Find me the best 10 gyms in Delhi,Best Gyms In Delhi,https://www.cult.fit/lp/cult/center/gyms-in-delhi,,,,0.48,0.465
+Find me the best 10 gyms in Delhi,Anytime Fitness,https://www.anytimefitness.com/en-in/locations/delhi-delhi-in-1082,,,,0.686,0.575
+Find me the best 10 gyms in Delhi,"Find best Gyms, Yoga, Dance & Fitness Classes in Delhi",https://www.wtfgyms.com/gyms/best-gym-in-delhi,,,,0.48,0.465
+Find me the best 10 gyms in Delhi,List Of Gyms in Delhi,https://rentechdigital.com/smartscraper/business-report-details/india/list-of-gyms-in-delhi,,,,0.48,0.465
+Find me the best 10 gyms in Delhi,"Best Gyms, Nutritionist & Fitness Studios in Delhi",https://fitpass.co.in/delhi?srsltid=AfmBOoqz8Efp916Tum3aUcT_35cHbIz1UCwff2yq_g61DgCdzD4Ghvor,,,,0.48,0.465
+Show me diagnostic centres in Lucknow,Diagnostic Centres in Lucknow,https://apollodiagnostics.in/find-nearest-centre/lucknow-3126,,,,0.48,0.465
+Show me diagnostic centres in Lucknow,Best Diagnostic Centre in Lucknow,https://chandandiagnostic.com/,,,,0.71,0.621
+Show me diagnostic centres in Lucknow,Welcome to Charak Diagnostics Centre,https://charakdiagnostic.com/,,,,0.702,0.62
+Show me diagnostic centres in Lucknow,"Best Diagnostic Centre in Lucknow, Pathology Lab Near Me",https://redcliffelabs.com/lucknow,,,,0.48,0.465
+Show me diagnostic centres in Lucknow,Care Diagnostic Center,https://carediagnosticcenter.co.in/,,,,0.5,0.511
+Show me diagnostic centres in Lucknow,Best Diagnostic Centre in Lucknow,https://lucknowimagingcentre.com/,,,,0.775,0.671
+Show me diagnostic centres in Lucknow,List of Diagnostic Centres in Lucknow,https://www.medifee.com/dc-in-lucknow,,,,0.48,0.465
+Wipro Bengaluru,Wipro Locations Across the Globe Driving Business ...,https://www.wipro.com/locations/,,,,0.73,0.584
+Bata Kolkata,Find Bata Stores Near You,https://stores.bata.com/,,,,0.75,0.629
+small business consulting services in Rajkot,SME Business Consultant in Rajkot,https://www.bewise.co.in/sme-business-consultant-in-rajkot,,,,0.48,0.465
+small business consulting services in Rajkot,BAPA Consultancy Company,https://www.bapaconsultancycompany.com/,,,,0.713,0.622
+small business consulting services in Rajkot,"Growth Business Marketing Consulting in Rajkot, Morbi ...",https://www.camphorsolutions.com/business-growth-consultant-marketing-services-management-consulting-firms-in-morbi-rajkot-gujarat/,,,,0.48,0.465
+small business consulting services in Rajkot,Business Management Consultancy Services in Rajkot,https://mechminds.co.in/business-management-consultant-rajkot/,,,,0.48,0.465
+small business consulting services in Rajkot,Franchise Consultants in Rajkot,https://www.sparkleminds.com/franchise-consultants-in-rajkot/,,,,0.48,0.465
+small business consulting services in Rajkot,STARTUP FUNDING Consultants in Rajkot,https://www.fintaxx.in/startup-funding-consultants-in-rajkot-gujarat,,,,0.48,0.465
+Cafe Coffee Day outlets in Hyderabad,,,,,no validated business found for this query,,
+Infosys Pune,,,,,no validated business found for this query,,
+Titan showroom Chennai,,,,,no validated business found for this query,,

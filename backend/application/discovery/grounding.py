@@ -21,6 +21,8 @@ now rejected by the stricter checks below.
 import re
 from typing import List, Optional
 
+from application.discovery import canonicalization
+
 # Generic words that carry no brand-identifying signal on their own.
 # Includes both generic corporate suffixes (store/company/pvt/ltd/...)
 # and generic business-*type* descriptors (hospital/hotel/clinic/...):
@@ -75,7 +77,15 @@ def significant_words(text: Optional[str]) -> List[str]:
 
 
 def domain_root(domain: str) -> str:
-    return domain.split(".")[0] if domain else ""
+    """The brand-identifying label of `domain` -- e.g. "mochishoes" for
+    both "mochishoes.com" and a subdomain-hosted "store.mochishoes.com".
+    Delegates to canonicalization.root_label() (registrable-domain-aware,
+    already handles compound suffixes like .co.in/.edu.in) rather than
+    naively taking the first dot-separated label, which previously
+    returned the subdomain itself ("store") for any subdomain-hosted
+    site -- silently zeroing out brand_match_strength() for real,
+    reachable, correctly-branded candidates."""
+    return canonicalization.root_label(domain) if domain else ""
 
 
 def brand_match_strength(business_name: str, domain: str) -> float:

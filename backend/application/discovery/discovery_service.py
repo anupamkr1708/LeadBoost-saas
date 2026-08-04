@@ -19,6 +19,18 @@ Lead is hantded to LeadPipeline.execute() -- from that point on, the
 existing, unmodified pipeline (and its own AI-feature gating) takes over
 exactly as it does for manually-created leads.
 
+Sprint 4 (Discovery Quality Refinement): `_resolve_and_validate` now calls
+`WebsiteResolver.resolve_with_digital_identity()` instead of `resolve()`
+-- an existing, unchanged public method (Sprint 2C) that returns the
+identical `WebsiteResolution` alongside the canonical
+`VerifiedDigitalIdentity`, which was already being computed internally on
+every call and simply discarded before (see WebsiteResolver's own
+docstring). `DiscoveredBusiness.identity` carries it through to
+`ranking.py`, which now scores from these already-computed signals
+instead of recomputing brand/location/completeness from raw candidate
+fields a second time. Every other stage, and every externally observable
+behavior of `discover_and_create_leads()`, is unchanged.
+
 The default website-resolution fallback provider is SerperWebsiteResolver
 (application.discovery.providers.serper_provider) -- Brave's API now
 requires a card on file, whereas Serper offers a free tier with no card
@@ -46,8 +58,10 @@ import os
 import time
 from typing import List, Optional
 
+import aiohttp
 from sqlalchemy.orm import Session
 
+from application.discovery.digital_identity import DigitalIdentityBuilder
 from application.discovery.dto import (
     BusinessCandidate,
     DiscoveredBusiness,
@@ -58,6 +72,8 @@ from application.discovery.dto import (
 )
 from application.discovery.duplicate_detector import DuplicateDetector
 from application.discovery.exceptions import ProviderError, QueryParseError
+from application.discovery.false_positive import DomainObservationRegistry
+from application.discovery.identity_resolution_engine import IdentityResolutionEngine
 from application.discovery.providers.base import BusinessSearchProvider, WebsiteResolverProvider
 from application.discovery.providers.overpass_provider import OverpassProvider
 from application.discovery.providers.serper_provider import (
@@ -66,6 +82,7 @@ from application.discovery.providers.serper_provider import (
 )
 from application.discovery.query_parser import QueryParser
 from application.discovery.ranking import rank_businesses
+from application.discovery.reliability import ProviderReliabilityRegistry
 from application.discovery.website_resolver import WebsiteResolver
 from application.discovery.website_validator import WebsiteValidator
 from application.observability.repository import create_discovery_run_record
@@ -87,6 +104,9 @@ class DiscoveryService:
         resolver_fallback: Optional[WebsiteResolverProvider] = None,
         validator: Optional[WebsiteValidator] = None,
         business_search_fallback: Optional[BusinessSearchProvider] = None,
+        session: Optional[aiohttp.ClientSession] = None,
+        reliability_registry: Optional[ProviderReliabilityRegistry] = None,
+        domain_observations: Optional[DomainObservationRegistry] = None,
     ):
         self.db = db
         self.parser = QueryParser()
@@ -95,7 +115,25 @@ class DiscoveryService:
         self.resolver_fallback = (
             resolver_fallback if resolver_fallback is not None else SerperWebsiteResolver()
         )
-        self.resolver = WebsiteResolver(self.validator, self.resolver_fallback)
+        # H4: explicit, named references instead of letting
+        # IdentityResolutionEngine construct its own defaults several
+        # layers deep with nothing at this level ever reading them back.
+        # Both registries were already being built and used every run
+        # (reliability.py / false_positive.py, Sprint 3/4) -- this changes
+        # nothing about what gets computed, only makes the result visible
+        # here and in DiscoveryResponse.provider_metrics (below).
+        self.reliability_registry = reliability_registry or ProviderReliabilityRegistry()
+        self.domain_observations = domain_observations or DomainObservationRegistry()
+        identity_resolution_engine = IdentityResolutionEngine(
+            reliability_registry=self.reliability_registry,
+            domain_observations=self.domain_observations,
+        )
+        digital_identity_builder = DigitalIdentityBuilder(
+            identity_resolution_engine=identity_resolution_engine
+        )
+        self.resolver = WebsiteResolver(
+            self.validator, self.resolver_fallback, digital_identity_builder=digital_identity_builder
+        )
         # Only ever used when self.search_provider returns zero candidates
         # -- see the module docstring and _search below. Pass
         # business_search_fallback=None explicitly to disable it outright.
@@ -114,6 +152,69 @@ class DiscoveryService:
         self.max_concurrent_resolutions = max(
             1, int(os.getenv("DISCOVERY_MAX_CONCURRENT_RESOLUTIONS", "5"))
         )
+
+        # -- H1: shared HTTP session (connection reuse) --------------------
+        # `session`, if the caller already manages one (e.g. one created
+        # at FastAPI app startup and closed at shutdown -- the standard
+        # aiohttp pattern), is used as-is and never closed by this class.
+        #
+        # If not supplied, we lazily create and own one ourselves --
+        # lazily, not here in __init__, because aiohttp.ClientSession()
+        # must be constructed inside a running event loop, and this
+        # constructor is a plain sync __init__ that may be called from a
+        # context with no running loop (e.g. a sync FastAPI dependency
+        # provider). See `_ensure_shared_session`, called at the top of
+        # `discover_and_create_leads`. Only threaded into the four
+        # sub-components THIS constructor created itself (tracked below);
+        # a caller-supplied provider instance keeps whatever session
+        # configuration the caller already gave it.
+        self._session = session
+        self._owned_session: Optional[aiohttp.ClientSession] = None
+        self._owns_search_provider = search_provider is None
+        self._owns_resolver_fallback = resolver_fallback is None
+        self._owns_validator = validator is None
+        self._owns_business_search_fallback = business_search_fallback is None
+
+    async def _ensure_shared_session(self) -> Optional[aiohttp.ClientSession]:
+        """Lazily creates (once) the one shared aiohttp session this
+        instance's own default sub-components reuse for every HTTP call
+        across every `discover_and_create_leads` call on this instance --
+        not just within one call (see H1 in the hardening plan: several
+        hundred HTTP calls happen in a single benchmark run, previously
+        each paying its own fresh TCP+TLS handshake). No-op on every call
+        after the first. Returns None if this instance has no default
+        components to wire a session into (session reuse then simply
+        doesn't apply, exactly like today)."""
+        if self._session is not None:
+            return self._session
+        if self._owned_session is None and (
+            self._owns_search_provider or self._owns_resolver_fallback
+            or self._owns_validator or self._owns_business_search_fallback
+        ):
+            self._owned_session = aiohttp.ClientSession()
+            if self._owns_validator:
+                self.validator.session = self._owned_session
+            if self._owns_resolver_fallback:
+                self.resolver_fallback.session = self._owned_session
+            if self._owns_search_provider:
+                self.search_provider.session = self._owned_session
+            if self._owns_business_search_fallback and self.business_search_fallback is not None:
+                self.business_search_fallback.session = self._owned_session
+        return self._owned_session
+
+    async def aclose(self) -> None:
+        """Closes the shared aiohttp session this instance created for
+        itself (H1), if any. No-op if a caller supplied their own session
+        (they own its lifecycle) or if no HTTP call has happened yet.
+        Safe to call more than once. Callers that keep one DiscoveryService
+        instance alive across many `discover_and_create_leads` calls (the
+        case H1 is actually optimizing for) should call this once when
+        they're done with the instance -- e.g. app shutdown, worker
+        teardown, or (for the discovery_eval benchmark harness) once after
+        the whole query batch finishes, not after each query."""
+        if self._owned_session is not None and not self._owned_session.closed:
+            await self._owned_session.close()
+        self._owned_session = None
 
     async def discover_and_create_leads(
         self,
@@ -190,11 +291,24 @@ class DiscoveryService:
             businesses_found=businesses_returned,
             businesses=outcomes,
             duration_ms=duration_ms,
+            provider_metrics={
+                "provider_reliability": self.reliability_registry.to_dict(),
+                "domain_observations": self.domain_observations.to_dict(),
+            },
         )
 
     # -- Stage: search (with retry inside the provider, graceful failure here) --
 
     async def _search(self, parsed: ParsedQuery) -> List[BusinessCandidate]:
+        # H1: lazily wire up the shared session on first use. _search is
+        # always the first HTTP-issuing stage, whether reached via
+        # discover_and_create_leads() or called directly (e.g. by the
+        # discovery_eval benchmark harness, which calls _search /
+        # _resolve_and_validate on this same instance without ever going
+        # through discover_and_create_leads()) -- one call site covers
+        # both. No-op after the first call.
+        await self._ensure_shared_session()
+
         with stage_span(
             "discovery_search",
             provider=self.search_provider.name,
@@ -266,14 +380,31 @@ class DiscoveryService:
         increasing memory (each in-flight resolution is one aiohttp
         request, not a heavy process/thread), which matters on a
         constrained deployment target. Results preserve the original
-        candidate order regardless of which finished first."""
+        candidate order regardless of which finished first.
+
+        Sprint 4: calls `resolve_with_digital_identity()` (unchanged
+        WebsiteResolver public API) instead of `resolve()`, so every
+        `DiscoveredBusiness` also carries the VerifiedDigitalIdentity
+        `ranking.py` now ranks from -- no new I/O beyond what `resolve()`
+        already performed (both methods run the exact same internal
+        resolution; the digital-identity object was already being built
+        internally either way, see WebsiteResolver's own docstring)."""
         resolved_via_fallback_count = 0
         semaphore = asyncio.Semaphore(self.max_concurrent_resolutions)
 
         async def resolve_one(candidate: BusinessCandidate) -> DiscoveredBusiness:
             async with semaphore:
                 try:
-                    resolution = await self.resolver.resolve(candidate, location)
+                    # Sprint 4: resolve_with_digital_identity() (an
+                    # existing, unchanged WebsiteResolver public method
+                    # since Sprint 2C) instead of plain resolve() -- same
+                    # WebsiteResolution, plus the VerifiedDigitalIdentity
+                    # ranking.py now consumes instead of recomputing brand/
+                    # location/completeness signals from raw candidate
+                    # fields. WebsiteResolver's public API is completely
+                    # unchanged by this; only which of its two already
+                    # -public methods this internal call site uses.
+                    resolution, identity = await self.resolver.resolve_with_digital_identity(candidate, location)
                 except Exception as e:
                     # A single business's resolution must never abort the batch.
                     logger.warning(f"Website resolution failed for '{candidate.name}': {e}")
@@ -283,7 +414,8 @@ class DiscoveryService:
                         validated=False,
                         rejection_reason="resolution_error",
                     )
-            return DiscoveredBusiness(candidate=candidate, resolution=resolution)
+                    identity = None
+            return DiscoveredBusiness(candidate=candidate, resolution=resolution, identity=identity)
 
         with stage_span("discovery_resolve_validate", candidate_count=len(candidates)):
             discovered = list(await asyncio.gather(*[resolve_one(c) for c in candidates]))

@@ -150,9 +150,18 @@ class ValidationOutcome:
 
 
 class WebsiteValidator:
-    def __init__(self, timeout: int = _DEFAULT_TIMEOUT, allow_directories: bool = False):
+    def __init__(
+        self,
+        timeout: int = _DEFAULT_TIMEOUT,
+        allow_directories: bool = False,
+        session: Optional[aiohttp.ClientSession] = None,
+    ):
         self.timeout = timeout
         self.allow_directories = allow_directories
+        # H1: connection reuse. Settable after construction too, so
+        # DiscoveryService can wire in a lazily-created shared session --
+        # see DiscoveryService._ensure_shared_session.
+        self.session = session
 
     async def validate(self, url: Optional[str]) -> ValidationOutcome:
         if not url or not url.strip():
@@ -206,10 +215,20 @@ class WebsiteValidator:
         """One retry on transient failures (429/503/timeout/connection
         reset) -- the previous single-attempt validator permanently
         rejected otherwise-valid sites on a one-off blip."""
+        if self.session is not None:
+            async with self.session.get(
+                url,
+                allow_redirects=True,
+                headers=_DEFAULT_HEADERS,
+                timeout=aiohttp.ClientTimeout(total=self.timeout),
+            ) as response:
+                if response.status in (429, 503):
+                    raise aiohttp.ClientError(f"Retryable status {response.status}")
+                return response.status, dict(response.headers), str(response.url)
         async with aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=self.timeout)
-        ) as session:
-            async with session.get(
+        ) as owned_session:
+            async with owned_session.get(
                 url, allow_redirects=True, headers=_DEFAULT_HEADERS
             ) as response:
                 # 429/503 are worth retrying (transient); read nothing else

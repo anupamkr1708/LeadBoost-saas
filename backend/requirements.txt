@@ -68,6 +68,14 @@ pytest>=7.4.0,<8.0.0
 pytest-asyncio>=0.21.0,<1.0.0
 httpx>=0.25.0,<1.0.0
 
+# Discovery Evaluation (discovery_eval/) -- offline benchmark harness for
+# the Discovery pipeline; charts.py renders latency/confidence/validation/
+# provider-performance PNGs from a completed eval run. Not used by the
+# running API/worker, only by `python -m discovery_eval.run_eval` and its
+# own unit tests (discovery_eval/tests/), which the CI test job now runs
+# alongside backend/tests/.
+matplotlib>=3.8.0,<4.0.0
+
 # Development (optional)
 black>=23.0.0,<24.0.0
 flake8>=6.0.0,<7.0.0
