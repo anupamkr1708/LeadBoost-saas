@@ -43,9 +43,36 @@ async def create_org(
     # Create organization
     db_org = create_organization(db, organization)
 
-    # Add current user to the organization
-    current_user.organization_id = db_org.id
-    db.commit()
+    # NOTE: This endpoint must NOT reassign the calling user's
+    # organization_id. The data model is strictly one-user-belongs-to-
+    # exactly-one-organization (User.organization_id is a single FK, set
+    # once at /register and treated as authoritative for every tenancy
+    # check throughout the app -- see api/endpoints/leads.py,
+    # organizations.py GET/PUT, discovery, analytics, and usage).
+    #
+    # This endpoint previously did `current_user.organization_id =
+    # db_org.id` here, which silently moved the authenticated user into
+    # the brand-new organization on every call. That had two confirmed
+    # consequences:
+    #   1. The user instantly and silently lost access to their original
+    #      organization's leads/data, since every org-scoped query uses
+    #      current_user.organization_id. This was the root cause of the
+    #      previously-reported "POST /leads/single -> 403" runtime
+    #      validation failure: the test script creates a "secondary org"
+    #      here, which reassigned its organization_id out from under it,
+    #      so the organization_id/owner_id it later submitted to
+    #      /leads/single (captured at registration) no longer matched
+    #      current_user.organization_id.
+    #   2. Because crud.create_organization() does not assign a
+    #      subscription/plan (only /register does that), the freshly
+    #      created organization has no Subscription row and therefore
+    #      defaults to the free plan with zero usage recorded today --
+    #      letting a user who has exhausted FREE_MAX_LEADS_PER_DAY bypass
+    #      the daily lead quota simply by calling this endpoint again.
+    #
+    # Creating an organization record is fine (e.g. for future
+    # multi-org/invite flows); silently switching the caller's own
+    # tenancy is not, so that side effect has been removed.
 
     return db_org
 

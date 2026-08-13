@@ -102,7 +102,29 @@ class SubscriptionService:
         return usage.can_process_more_today
 
     def can_use_ai_features(self, organization_id: int) -> bool:
-        """Check if an organization can use AI features"""
+        """Check if an organization can use AI features
+        
+        LOCAL DEVELOPMENT BYPASS:
+        Set ENABLE_AI_FOR_ALL_PLANS=true in .env to enable AI features
+        for ALL plans (including free) during local development/testing.
+        
+        This bypass ONLY works when:
+        - ENVIRONMENT != "production" (enforced by config validation)
+        - ENABLE_AI_FOR_ALL_PLANS is explicitly set to "true"
+        
+        Production behavior is unchanged: AI features require Pro/Enterprise
+        plans with CAN_USE_AI_PRO=true or CAN_USE_AI_ENTERPRISE=true.
+        """
+        # LOCAL DEV BYPASS: Enable AI for all plans in non-production environments
+        # This is controlled by ENABLE_AI_FOR_ALL_PLANS env var, which only works
+        # when ENVIRONMENT != "production" (validated at startup in config.py)
+        environment = os.getenv("ENVIRONMENT", "development").lower()
+        enable_ai_bypass = os.getenv("ENABLE_AI_FOR_ALL_PLANS", "false").lower() == "true"
+        
+        if environment != "production" and enable_ai_bypass:
+            return True
+        
+        # PRODUCTION PATH: unchanged subscription-based gating
         subscription = (
             self.db.query(Subscription)
             .filter(Subscription.organization_id == organization_id)

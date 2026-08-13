@@ -11,7 +11,12 @@ from core.infrastructure.database import get_db
 from core.infrastructure.auth.security import get_current_user
 from core.domain.models.user import User
 from core.domain.models.lead import Lead
-from core.domain.schemas.lead import Lead as LeadSchema, LeadCreate, LeadUpdate
+from core.domain.schemas.lead import (
+    Lead as LeadSchema,
+    LeadCreate,
+    LeadDetail,
+    LeadUpdate,
+)
 from pydantic import BaseModel
 from core.infrastructure.database.crud import (
     create_lead,
@@ -24,6 +29,7 @@ from core.infrastructure.database.crud import (
 from core.infrastructure.scraping.scraper import get_scraper, TieredScraper
 from core.infrastructure.logging import get_logger, log_scraping_attempt
 from application.workflows.lead_pipeline import run_lead_pipeline
+from application.services.infra_adapters import get_lead_ai_insights
 from core.infrastructure.billing.subscription_service import SubscriptionService
 
 logger = get_logger(__name__)
@@ -304,13 +310,15 @@ async def read_leads(
     return leads
 
 
-@router.get("/{lead_id}", response_model=LeadSchema)
+@router.get("/{lead_id}", response_model=LeadDetail)
 async def read_lead(
     lead_id: int,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> Any:
-    """Get a specific lead by ID"""
+    """Get a specific lead by ID, including its AI insights (Company
+    Intelligence, Decision, Evaluation, Review, Messaging), if the
+    pipeline has produced them yet."""
     lead = get_lead(db, lead_id)
 
     if not lead:
@@ -325,7 +333,8 @@ async def read_lead(
             detail="Not authorized to access this lead",
         )
 
-    return lead
+    ai_insights = get_lead_ai_insights(db, lead_id)
+    return LeadDetail(**LeadSchema.model_validate(lead).model_dump(), ai_insights=ai_insights)
 
 
 @router.put("/{lead_id}", response_model=LeadSchema)
@@ -414,7 +423,19 @@ async def process_lead_now(
             detail="AI features are not available on your subscription plan",
         )
 
-    # Process the lead now via the LangGraph LeadPipeline
-    await run_lead_pipeline(lead_id)
+    # Process the lead now via the LangGraph LeadPipeline.
+    #
+    # Bug fix (integration audit #10 / API contract): `run_lead_pipeline`
+    # already computes the full PipelineResult -- scraping/enrichment
+    # success flags, company_intelligence, decision, evaluation, review,
+    # message, timings -- but this endpoint previously discarded that
+    # return value entirely and always responded with a static
+    # "processing started" placeholder, even though the call above is
+    # awaited synchronously and the result was available. `result` here
+    # is exactly the dict `PipelineResult.model_dump()` produces (see
+    # application/workflows/lead_pipeline.py); the placeholder
+    # `message`/`lead_id` fields are kept for any existing caller that
+    # only reads those two keys.
+    result = await run_lead_pipeline(lead_id)
 
-    return {"message": "Lead processing started", "lead_id": lead_id}
+    return {"message": "Lead processing complete", "lead_id": lead_id, "result": result}

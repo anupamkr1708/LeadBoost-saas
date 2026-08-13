@@ -36,6 +36,13 @@ class _StubDiscoveryService:
             duration_ms=42,
         )
 
+    async def aclose(self):
+        # Matches the real DiscoveryService's interface (see
+        # api/endpoints/discovery.py, which now calls this in a
+        # `finally` block on every request) so this stub stays a
+        # faithful double.
+        pass
+
 
 @pytest.fixture()
 def client_with_stubbed_discovery(monkeypatch):

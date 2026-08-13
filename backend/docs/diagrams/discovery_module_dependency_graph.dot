@@ -1,0 +1,220 @@
+digraph DiscoveryModuleDependencyGraph {
+  graph [
+    size="15,11!",
+    ratio=compress,
+    rankdir=TB,
+    fontname="Helvetica,Arial,sans-serif",
+    fontsize=20,
+    label="application/discovery/ -- full module dependency graph  (Sprints 1-4, Discovery Quality Refinement)",
+    labelloc=t,
+    labeljust=l,
+    bgcolor="white",
+    pad=0.4,
+    nodesep=0.35,
+    ranksep="0.9 equally",
+    compound=true,
+    fontcolor="#1a1a1a",
+    newrank=true
+  ];
+  node [
+    fontname="Helvetica,Arial,sans-serif",
+    fontsize=13,
+    shape=box,
+    style="rounded,filled",
+    margin="0.18,0.10",
+    penwidth=1.3
+  ];
+  edge [
+    fontname="Helvetica,Arial,sans-serif",
+    fontsize=10,
+    color="#8a8a8a",
+    arrowsize=0.7,
+    penwidth=1.1
+  ];
+
+  /* ---- Orchestrator ---- */
+  subgraph cluster_orch {
+    label="Orchestration";
+    style="rounded,filled";
+    color="#4a4a4a";
+    fillcolor="#eef0f2";
+    fontsize=14;
+    discovery_service [label="discovery_service.py\nDiscoveryService", fillcolor="#37474f", fontcolor="white", penwidth=2];
+  }
+
+  /* ---- Foundation DTOs ---- */
+  subgraph cluster_dto {
+    label="Shared Foundation";
+    style="rounded,filled";
+    color="#9e9e9e";
+    fillcolor="#f5f5f5";
+    fontsize=14;
+    dto [label="dto.py", fillcolor="#e0e0e0"];
+    exceptions [label="exceptions.py", fillcolor="#e0e0e0"];
+  }
+
+  /* ---- Search & Resolution (pre-existing MVP) ---- */
+  subgraph cluster_search {
+    label="Search, Resolution & Validation";
+    style="rounded,filled";
+    color="#1565c0";
+    fillcolor="#e3f2fd";
+    fontsize=14;
+    query_parser [label="query_parser.py", fillcolor="#bbdefb"];
+    locations [label="locations.py", fillcolor="#bbdefb"];
+    overpass [label="providers/\noverpass_provider.py", fillcolor="#bbdefb"];
+    serper [label="providers/\nserper_provider.py", fillcolor="#bbdefb"];
+    brave [label="providers/\nbrave_provider.py\n(legacy, injectable)", fillcolor="#e1f5fe", style="rounded,filled,dashed"];
+    http_utils [label="providers/\nhttp_utils.py", fillcolor="#bbdefb"];
+    base [label="providers/base.py", fillcolor="#bbdefb"];
+    business_normalizer [label="business_normalizer.py", fillcolor="#bbdefb"];
+    website_validator [label="website_validator.py", fillcolor="#bbdefb"];
+    duplicate_detector [label="duplicate_detector.py", fillcolor="#bbdefb"];
+  }
+
+  /* ---- Digital Identity Pipeline (Sprints 1-4, this change) ---- */
+  subgraph cluster_identity {
+    label="Digital Identity Pipeline  (NEW -- Sprints 1-4)";
+    style="rounded,filled";
+    color="#e65100";
+    fillcolor="#fff3e0";
+    fontsize=14;
+
+    evidence [label="evidence.py\nSprint 1: raw signal -> Evidence", fillcolor="#ffe0b2"];
+    features [label="features.py\nSprint 2B: Evidence -> Features", fillcolor="#ffe0b2"];
+    verification [label="verification.py\nSprint 2B: Features -> Verification", fillcolor="#ffe0b2"];
+    confidence [label="confidence.py\nSprint 2B: staged confidence", fillcolor="#ffe0b2"];
+    identity [label="identity.py\nSprint 2A: BusinessIdentity", fillcolor="#ffcc80"];
+    canonicalization [label="canonicalization.py\nSprint 3: domain structure", fillcolor="#ffe0b2"];
+    organization [label="organization.py\nSprint 3: IdentityCandidate +\nOrganizationGroup", fillcolor="#ffcc80"];
+    competition [label="competition.py\nSprint 3: competition +\nconflict resolution", fillcolor="#ffcc80"];
+    reliability [label="reliability.py\nSprint 3/4: provider\nreliability registry", fillcolor="#ffcc80"];
+    false_positive [label="false_positive.py\nSprint 3: rejection signals", fillcolor="#ffcc80"];
+    identity_resolution_engine [label="identity_resolution_engine.py\nSprint 3/4: orchestrates\ncanon/org/competition/\nreliability/false_positive", fillcolor="#ffa726"];
+    digital_identity [label="digital_identity.py\nSprint 2C: VerifiedDigitalIdentity\n(quality + risk + consensus)", fillcolor="#fb8c00", fontcolor="white", penwidth=2];
+  }
+
+  /* ---- Bridges back into the MVP pipeline ---- */
+  subgraph cluster_bridge {
+    label="Consumes Digital Identity";
+    style="rounded,filled";
+    color="#2e7d32";
+    fillcolor="#e8f5e9";
+    fontsize=14;
+    website_resolver [label="website_resolver.py\nresolve() / resolve_with_\ndigital_identity()", fillcolor="#c8e6c9"];
+    ranking [label="ranking.py\nfallback- or identity-aware\nscoring", fillcolor="#c8e6c9"];
+    grounding [label="grounding.py\nbrand/domain match math", fillcolor="#c8e6c9"];
+  }
+
+  /* ================= edges ================= */
+
+  /* orchestrator */
+  discovery_service -> query_parser;
+  discovery_service -> overpass;
+  discovery_service -> serper;
+  discovery_service -> website_resolver;
+  discovery_service -> website_validator;
+  discovery_service -> duplicate_detector;
+  discovery_service -> ranking;
+  discovery_service -> dto;
+  discovery_service -> exceptions;
+  discovery_service -> false_positive [label="reliability/domain\nregistries", fontcolor="#e65100", color="#e65100"];
+  discovery_service -> identity_resolution_engine [color="#e65100"];
+  discovery_service -> digital_identity [color="#e65100", penwidth=1.6];
+  discovery_service -> reliability [color="#e65100"];
+  discovery_service -> base;
+
+  /* search/resolution */
+  query_parser -> dto;
+  query_parser -> exceptions;
+  query_parser -> locations;
+  overpass -> business_normalizer;
+  overpass -> dto;
+  overpass -> exceptions;
+  overpass -> locations;
+  overpass -> base;
+  serper -> grounding;
+  serper -> http_utils;
+  serper -> base;
+  serper -> dto;
+  serper -> website_validator;
+  brave -> http_utils;
+  brave -> base;
+  brave -> website_validator;
+  base -> dto;
+  business_normalizer -> dto;
+  duplicate_detector -> dto;
+
+  /* website_resolver bridges old <-> new */
+  website_resolver -> website_validator;
+  website_resolver -> base;
+  website_resolver -> dto;
+  website_resolver -> evidence [color="#e65100"];
+  website_resolver -> identity [color="#e65100"];
+  website_resolver -> digital_identity [color="#e65100", penwidth=1.6];
+
+  /* ranking / grounding */
+  ranking -> grounding;
+  ranking -> dto;
+  ranking -> features [color="#e65100"];
+  ranking -> website_validator;
+  grounding -> canonicalization [color="#e65100"];
+
+  /* digital identity pipeline internals */
+  evidence -> grounding;
+  evidence -> website_validator;
+  features -> evidence;
+  features -> grounding;
+  features -> dto;
+  verification -> features;
+  confidence -> features;
+  confidence -> verification;
+  identity -> evidence;
+  identity -> grounding;
+  identity -> confidence;
+  identity -> features;
+  identity -> verification;
+  identity -> dto;
+  organization -> canonicalization;
+  organization -> evidence;
+  organization -> features;
+  organization -> identity;
+  organization -> verification;
+  competition -> features;
+  competition -> identity;
+  competition -> organization;
+  false_positive -> canonicalization;
+  false_positive -> features;
+  false_positive -> evidence;
+  false_positive -> organization;
+  identity_resolution_engine -> competition;
+  identity_resolution_engine -> false_positive;
+  identity_resolution_engine -> features;
+  identity_resolution_engine -> grounding;
+  identity_resolution_engine -> identity;
+  identity_resolution_engine -> organization;
+  identity_resolution_engine -> reliability;
+  identity_resolution_engine -> dto;
+  digital_identity -> confidence;
+  digital_identity -> evidence;
+  digital_identity -> features;
+  digital_identity -> identity;
+  digital_identity -> identity_resolution_engine;
+  digital_identity -> verification;
+  digital_identity -> dto;
+
+  /* legend */
+  subgraph cluster_legend {
+    label="Legend";
+    style="rounded,filled";
+    color="#9e9e9e";
+    fillcolor="white";
+    fontsize=12;
+    rank=sink;
+    l1 [label="pre-existing MVP module", fillcolor="#bbdefb", shape=box, fontsize=11, margin="0.08,0.05"];
+    l2 [label="new Sprint 1-4 module", fillcolor="#ffcc80", shape=box, fontsize=11, margin="0.08,0.05"];
+    l3 [label="terminal object / entry point", fillcolor="#37474f", fontcolor=white, shape=box, fontsize=11, margin="0.08,0.05"];
+    l1 -> l2 [style=invis];
+    l2 -> l3 [style=invis];
+  }
+}

@@ -30,7 +30,7 @@ def is_llm_available() -> bool:
 
 
 def get_model_name() -> str:
-    return os.getenv("LLM_MODEL", "llama-3.3-70b-versatile")
+    return os.getenv("LLM_MODEL", "openai/gpt-oss-120b")
 
 
 def get_llm(temperature: float = 0.0, max_tokens: int = 600):
@@ -112,6 +112,28 @@ def safe_invoke_json(
         chain = prompt | llm
         response, retry_count = _invoke_chain_with_retry(chain, inputs)
         content = response.content if hasattr(response, "content") else str(response)
+
+        print("\n" + "=" * 80)
+        print("RAW LLM RESPONSE")
+        print("=" * 80)
+        print("MODEL:", get_model_name())
+
+        print("CONTENT LENGTH:", len(content))
+
+        print("RAW:")
+        print(repr(content))
+
+        print()
+
+        print("RESPONSE METADATA:")
+        print(getattr(response, "response_metadata", None))
+
+        print()
+
+        print("ADDITIONAL KWARGS:")
+        print(getattr(response, "additional_kwargs", None))
+
+        print("=" * 80 + "\n")
 
         json_match = re.search(r"\{.*\}", content, re.DOTALL)
         if not json_match:

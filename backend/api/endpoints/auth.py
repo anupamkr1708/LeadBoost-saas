@@ -182,12 +182,10 @@ async def login_user(
 @router.post("/refresh")
 async def refresh_token(refresh_token: str, db: Session = Depends(get_db)) -> Any:
     """Refresh access token using refresh token"""
-    # In a real implementation, you would verify the refresh token
-    # For now, we'll just create a new access token
-    from core.infrastructure.auth.security import verify_token
+    from core.infrastructure.auth.security import verify_refresh_token
 
     try:
-        token_data = verify_token(refresh_token)
+        token_data = verify_refresh_token(refresh_token)
         if token_data.get("token_type") != "refresh":
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,

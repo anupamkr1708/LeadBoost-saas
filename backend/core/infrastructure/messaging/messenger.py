@@ -31,7 +31,7 @@ class Messenger:
         # var as the fallback for callers that don't have one -- see
         # application.services.infra_adapters.generate_template_message.
         self.sender_org = sender_org or os.getenv("SENDER_ORG", "Our Company")
-        self.model_name = os.getenv("LLM_MODEL", "llama-3.3-70b-versatile")
+        self.model_name = os.getenv("LLM_MODEL", "openai/gpt-oss-120b")
 
     def generate_message(self, lead: Lead) -> Optional[str]:
         """
@@ -97,7 +97,6 @@ class Messenger:
         try:
             import os
             from langchain_groq import ChatGroq
-            from langchain_core.prompts import ChatPromptTemplate
 
             # Only proceed if we have API key
             api_key = os.getenv("GROQ_API_KEY")
@@ -110,25 +109,50 @@ class Messenger:
             # Create a context-safe prompt that only uses available data
             context = self._build_context(lead)
 
-            # Create prompt template
-            prompt = ChatPromptTemplate.from_messages(
-                [
-                    ("system", self._get_system_prompt()),
-                    ("human", self._get_human_prompt(context)),
-                ]
-            )
+            system_prompt = self._get_system_prompt()
+            human_prompt = self._get_human_prompt(context)
 
-            # Initialize LLM
-            llm = ChatGroq(
+            # Bug fix: this used to build these two already-fully-rendered
+            # strings (both are plain Python f-strings -- context's real
+            # values, including up to 200 chars of raw scraped
+            # `about_text`, are substituted in *before* this point) into a
+            # `ChatPromptTemplate.from_messages([...])`, then call
+            # `chain.invoke({})`.
+            #
+            # ChatPromptTemplate re-parses whatever string content it's
+            # given as its *own* f-string-style template, scanning for
+            # any `{...}` pattern and treating it as a required input
+            # variable to be filled in at `.invoke()` time. Real scraped
+            # website text/JSON-LD/CSS commonly contains literal curly
+            # braces (confirmed by reproducing this locally with
+            # synthetic about_text containing e.g. a JSON fragment or the
+            # substring `{sender_org}`) -- and `chain.invoke({})` always
+            # passed an *empty* dict, since these strings were never
+            # meant to be re-templated in the first place. Any lead
+            # whose scraped data contained a stray `{...}` therefore
+            # raised "Input to ChatPromptTemplate is missing variables
+            # ...", which the broad `except Exception` below silently
+            # swallowed -- always falling back to the template message
+            # (visible in server logs as a 100% LLM-message-generation
+            # failure rate, always immediately followed by a successful
+            # template fallback).
+            #
+            # Since both strings are already fully rendered, no
+            # templating engine is needed here at all -- pass them
+            # straight to the chat model as a plain message list, which
+            # ChatGroq (and every LangChain chat model) accepts directly
+            # without treating the content as a template.
+            response = ChatGroq(
                 api_key=api_key,
                 model=self.model_name,
                 temperature=0.3,  # Low temperature to reduce hallucinations
                 max_tokens=200,
+            ).invoke(
+                [
+                    ("system", system_prompt),
+                    ("human", human_prompt),
+                ]
             )
-
-            # Create chain and execute
-            chain = prompt | llm
-            response = chain.invoke({})
 
             content = (
                 response.content if hasattr(response, "content") else str(response)
@@ -195,7 +219,7 @@ class Messenger:
             f"\nWrite a personalized outreach message from {context['sender_org']} "
             f"to {context['company_name']} that acknowledges their work in {context['industry']}. "
             "The message should be professional but not overly formal. "
-            "Focus on how {sender_org} could provide value to their business."
+            f"Focus on how {context['sender_org']} could provide value to their business."
         )
 
         return "\n".join(prompt_parts)

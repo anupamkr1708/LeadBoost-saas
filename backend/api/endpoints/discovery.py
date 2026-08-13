@@ -73,5 +73,17 @@ async def search_businesses(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="Business discovery failed. Please try again shortly.",
         )
+    finally:
+        # Bug fix: DiscoveryService.aclose() (see discovery_service.py)
+        # exists specifically to close the aiohttp session this instance
+        # lazily creates for its own default sub-components, but nothing
+        # was ever calling it for the per-request instance created above
+        # -- every /discovery/search call leaked one aiohttp
+        # ClientSession + TCPConnector, only ever cleaned up later by the
+        # garbage collector (visible as recurring "Unclosed client
+        # session"/"Unclosed connector" warnings). This endpoint creates
+        # a fresh DiscoveryService per request, so it -- not app
+        # shutdown -- is the right place to close it, on every exit path.
+        await service.aclose()
 
     return result

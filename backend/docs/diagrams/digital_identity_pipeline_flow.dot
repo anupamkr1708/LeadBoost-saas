@@ -1,0 +1,87 @@
+digraph DigitalIdentityPipelineFlow {
+  graph [
+    size="15,11!",
+    ratio=compress,
+    rankdir=LR,
+    fontname="Helvetica,Arial,sans-serif",
+    fontsize=20,
+    label="Discovery -- Digital Identity Pipeline data flow  (per business candidate, inside website_resolver.resolve_with_digital_identity())",
+    labelloc=t,
+    labeljust=l,
+    bgcolor="white",
+    pad=0.4,
+    nodesep=0.4,
+    ranksep="0.75 equally",
+    fontcolor="#1a1a1a"
+  ];
+  node [
+    fontname="Helvetica,Arial,sans-serif",
+    fontsize=13,
+    shape=box,
+    style="rounded,filled",
+    margin="0.20,0.14",
+    penwidth=1.2
+  ];
+  edge [
+    fontname="Helvetica,Arial,sans-serif",
+    fontsize=11,
+    color="#616161",
+    arrowsize=0.8,
+    penwidth=1.2
+  ];
+
+  candidate [label="BusinessCandidate\n(from Overpass / Serper)", fillcolor="#eceff1"];
+
+  pool [label="CandidatePool\nevery URL considered,\nvalidated or not", fillcolor="#bbdefb"];
+  evidence [label="Evidence  (Sprint 1)\nEvidenceBundle per URL:\nprovider-found, brand match,\nlocation, reachability, HTTPS,\nprovider agreement", fillcolor="#ffe0b2"];
+
+  group [label="WebsiteCandidateGroup  (Sprint 2A)\ncandidates merged by domain", fillcolor="#ffcc80"];
+
+  features [label="Features  (Sprint 2B)\nFeatureSet: brand_similarity,\nreachability, https, domain_quality,\nlocation_consistency, completeness...", fillcolor="#ffe0b2"];
+  verification [label="Verification  (Sprint 2B)\n5 independent Verifiers:\nDomain / Business / Location /\nWebsite / Identity", fillcolor="#ffe0b2"];
+  confidence [label="Confidence  (Sprint 2B)\nprovider -> website -> business\n-> identity -> final, staged\nand fully explainable", fillcolor="#ffe0b2"];
+
+  identity [label="BusinessIdentity  (Sprint 2A)\nnormalized name, selected website,\nDecisionTrace, FeatureStore", fillcolor="#ffb74d"];
+
+  canon [label="canonicalization.py  (Sprint 3)\nregistrable domain, subdomain,\npunycode, default ports", fillcolor="#fff3e0"];
+  org [label="organization.py  (Sprint 3)\nIdentityCandidate -> consolidate()\n-> OrganizationGroup + relationships", fillcolor="#fff3e0"];
+  competition [label="competition.py  (Sprint 3)\ncompete() relative confidence +\nassess_conflicts()", fillcolor="#fff3e0"];
+  reliability [label="reliability.py  (Sprint 3/4)\nProviderReliabilityRegistry\n-- learns from observed agreement", fillcolor="#fff3e0"];
+  false_positive [label="false_positive.py  (Sprint 3)\nstructural rejection signals +\ncross-tenant domain reuse", fillcolor="#fff3e0"];
+
+  engine [label="IdentityResolutionEngine.resolve()\n(Sprint 3/4)\nIdentityResolutionResult:\nselection_confidence, alternatives,\nrejected reasons, stability,\nevidence_diversity", fillcolor="#fb8c00", fontcolor=white, penwidth=2];
+
+  digital_identity [label="VerifiedDigitalIdentity  (Sprint 2C)\nquality + risk + consensus +\nDigitalIdentityStatus\n(VERIFIED / LIKELY / UNVERIFIED / REJECTED)", fillcolor="#e65100", fontcolor=white, penwidth=2.2];
+
+  ranking [label="ranking.py\nidentity-aware business ranking", fillcolor="#c8e6c9"];
+  discovered [label="DiscoveredBusiness.identity\n(passed through discovery_service.py\nunchanged public WebsiteResolution)", fillcolor="#eceff1"];
+
+  candidate -> pool;
+  pool -> evidence [label="  per URL"];
+  evidence -> group [label="  group_website_\ncandidates()"];
+  group -> features [label="  extract()"];
+  features -> verification [label="  run()"];
+  verification -> confidence [label="  propagate()"];
+  confidence -> identity;
+  group -> identity [style=dashed, color="#9e9e9e", label="  merged groups"];
+
+  identity -> canon [style=dashed];
+  identity -> org;
+  canon -> org;
+  org -> competition;
+  reliability -> engine [label="  provider score"];
+  org -> engine;
+  competition -> engine;
+  false_positive -> engine;
+  identity -> engine [penwidth=1.6];
+
+  engine -> digital_identity [penwidth=2];
+  identity -> digital_identity [penwidth=1.6, label="  BusinessIdentity\n  (unchanged base)"];
+
+  digital_identity -> ranking [penwidth=1.8];
+  digital_identity -> discovered [penwidth=1.8];
+  ranking -> discovered [style=dashed, color="#9e9e9e"];
+
+  { rank=same; canon; org; }
+  { rank=same; competition; reliability; false_positive; }
+}

@@ -86,6 +86,23 @@ SessionLocal = sessionmaker(
 # Create base class for models
 Base = declarative_base()
 
+# Bug fix (found via a real pytest run: running any single test in
+# tests/application/test_subscription_service.py in isolation raised
+# `sqlalchemy.exc.InvalidRequestError: ... failed to locate a name
+# ('APIKey')` at mapper configuration). Every model module is imported
+# here, right after Base exists, so that SQLAlchemy's declarative class
+# registry always has every model registered before any mapper gets
+# configured -- regardless of which module happens to import
+# `core.infrastructure.database` first, which test runs first, or
+# whether a test is run in isolation. Without this, whether string-based
+# `relationship("APIKey")` references (organization.py, user.py) resolve
+# correctly was silently dependent on unrelated import order. Placed
+# after `Base = declarative_base()` (not at the top of the file) because
+# every model module does `from core.infrastructure.database import
+# Base`, which would otherwise be a circular import; by this point Base
+# already exists on this (partially-initialized) module.
+import core.domain.models  # noqa: F401,E402  (import-for-side-effect: model registration)
+
 
 def init_db():
     """Initialize the database by creating all tables"""

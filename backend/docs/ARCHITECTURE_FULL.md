@@ -15,18 +15,21 @@
 5. [API Layer — `api/endpoints/`](#5-api-layer--apiendpoints)
 6. [The "Top shoe stores in Mumbai" End-to-End Workflow](#6-the-top-shoe-stores-in-mumbai-end-to-end-workflow)
 7. [Discovery Subsystem — `application/discovery/`](#7-discovery-subsystem--applicationdiscovery)
-8. [AI Lead Pipeline — `application/workflows/` + agents](#8-ai-lead-pipeline--applicationworkflows--agents)
-9. [Application Support Modules](#9-application-support-modules)
-10. [Core Domain — `core/domain/`](#10-core-domain--coredomain)
-11. [Core Infrastructure — `core/infrastructure/`](#11-core-infrastructure--coreinfrastructure)
-12. [Observability — metrics, logging, analytics](#12-observability--metrics-logging-analytics)
-13. [Database Schema (ER Diagram)](#13-database-schema-er-diagram)
-14. [Full Per-File Responsibility Table](#14-full-per-file-responsibility-table)
-15. [Inter-File Dependency Map](#15-inter-file-dependency-map)
-16. [Known Gaps & Intentional Stubs](#16-known-gaps--intentional-stubs)
+8. [Digital Identity Pipeline — Sprints 1-4 Deep Dive](#8-digital-identity-pipeline--sprints-1-4-deep-dive)
+9. [Discovery Evaluation Harness — `discovery_eval/`](#9-discovery-evaluation-harness--discovery_eval)
+10. [AI Lead Pipeline — `application/workflows/` + agents](#10-ai-lead-pipeline--applicationworkflows--agents)
+11. [Application Support Modules](#11-application-support-modules)
+12. [Core Domain — `core/domain/`](#12-core-domain--coredomain)
+13. [Core Infrastructure — `core/infrastructure/`](#13-core-infrastructure--coreinfrastructure)
+14. [Observability — metrics, logging, analytics](#14-observability--metrics-logging-analytics)
+15. [Database Schema (ER Diagram)](#15-database-schema-er-diagram)
+16. [Full Per-File Responsibility Table](#16-full-per-file-responsibility-table)
+17. [Inter-File Dependency Map](#17-inter-file-dependency-map)
+18. [Testing Layout — `tests/`](#18-testing-layout--tests)
+19. [Diagram Tooling — Why SVG Instead of Mermaid for Large Diagrams](#19-diagram-tooling--why-svg-instead-of-mermaid-for-large-diagrams)
+20. [Known Gaps & Intentional Stubs](#20-known-gaps--intentional-stubs)
 
 ---
-
 ## 1. System Overview
 
 LeadBoost is a multi-tenant B2B lead-generation SaaS backend. It has **two major workflows**:
@@ -58,8 +61,19 @@ Clean layering with dependency direction `api → application → core`:
 - `core/infrastructure/` — DB engine/CRUD, auth/JWT, billing, scraping, enrichment,
   messaging, normalization, logging, (dormant) Celery worker.
 
----
+### Discovery Quality Refinement (Sprints 1-4)
 
+Layered underneath Business Discovery's deterministic pipeline is a second, internal-only
+pipeline that turns a resolved website into a scored, explainable **digital identity**:
+`evidence.py` -> `features.py` -> `verification.py` -> `confidence.py` -> `identity.py` ->
+`identity_resolution_engine.py` (built on `canonicalization.py` / `organization.py` /
+`competition.py` / `reliability.py` / `false_positive.py`) -> `digital_identity.py`. It never
+changes what the discovery API returns to existing callers -- it is consumed additively by
+`ranking.py` (better scoring when available, byte-for-byte unchanged fallback when not) and is
+now on the live request path via `WebsiteResolver.resolve_with_digital_identity()`. Full deep
+dive in §8, offline benchmark harness in §9.
+
+---
 ## 2. Layered Architecture Diagram
 
 ```mermaid
@@ -318,6 +332,7 @@ sequenceDiagram
     participant SP as providers/serper_provider.py
     participant WR as website_resolver.py
     participant WV as website_validator.py
+    participant DI as Digital Identity Pipeline<br/>(evidence -> ... -> digital_identity, §8)
     participant DD as duplicate_detector.py
     participant RK as ranking.py
     participant CR as core .. crud.py
@@ -340,19 +355,22 @@ sequenceDiagram
     end
 
     par per candidate (Semaphore, max 5 concurrent)
-        DS->>WR: resolve(candidate)
+        DS->>WR: resolve_with_digital_identity(candidate, location)  [Sprint 4]
         WR->>WV: validate(overpass website) if present
         alt no website or invalid
             WR->>SP: SerperWebsiteResolver.resolve(name, location)
             WR->>WV: validate(fallback website)
         end
-        WR-->>DS: WebsiteResolution
+        WR->>DI: build VerifiedDigitalIdentity from the same<br/>CandidatePool resolve() already populated
+        DI-->>WR: VerifiedDigitalIdentity (quality/risk/consensus)
+        WR-->>DS: (WebsiteResolution, VerifiedDigitalIdentity)
     end
 
     DS->>DD: detect(businesses)
     DD-->>DS: duplicates flagged (domain, else name+phone)
 
     DS->>RK: rank_businesses(eligible)
+    Note over RK: identity-aware scoring when<br/>business.identity is present (§6.7)
     RK-->>DS: deterministically ordered list
     DS->>DS: slice to limit (10)
 
@@ -363,13 +381,20 @@ sequenceDiagram
 
     par pipelines (Semaphore, max 3 concurrent)
         DS->>LP: run_lead_pipeline(lead.id)
-        Note over LP: full 10-node LangGraph run (Section 8)
+        Note over LP: full 10-node LangGraph run (Section 10)
     end
 
     DS->>CR: create_discovery_run_record(metrics)
     DS-->>EP: DiscoveryResponse (leads + outcomes + stats)
     EP-->>C: 200 JSON
 ```
+
+> **Why the identity pipeline is one box, not expanded inline:** `resolve_with_digital_identity()`
+> internally runs 12 further modules (Evidence → Features → Verification → Confidence → Identity →
+> Identity Resolution Engine → Digital Identity — see §8). Inlining all of that into this sequence
+> diagram the way the rest of the flow is drawn would make the diagram unreadable in GitHub's Mermaid
+> renderer (see §19 for why large diagrams in this document use pre-rendered SVG instead). §8 has the
+> dedicated data-flow diagram for what happens inside the `DI` participant above.
 
 ### 6.2 Step 1 — HTTP entry: `api/endpoints/discovery.py`
 
@@ -440,10 +465,11 @@ flowchart LR
 Shared `get_json` / `post_json` helpers — retry 2 attempts (wait 1.0–4.0s); non-200 raises
 `ProviderHTTPError` and is **not** retried.
 
-### 6.5 Step 4 — Website resolution & validation
+### 6.5 Step 4 — Website resolution, validation & digital identity
 
 `DiscoveryService._resolve_and_validate` runs per-candidate under an
-`asyncio.Semaphore(DISCOVERY_MAX_CONCURRENT_RESOLUTIONS)` (env default `"5"`).
+`asyncio.Semaphore(DISCOVERY_MAX_CONCURRENT_RESOLUTIONS)` (env default `"5"`), calling
+`WebsiteResolver.resolve_with_digital_identity()` — **not** plain `resolve()` — as of Sprint 4.
 
 ```mermaid
 flowchart TD
@@ -457,7 +483,16 @@ flowchart TD
     VAL2 -- valid --> OK2["resolution = fallback website<br/>(resolved_via_fallback=true)"]
     SCORE -- none pass --> NONE["website = None<br/>('never fabricate')"]
     VAL2 -- invalid --> NONE
+    OK & OK2 & NONE --> IDENT["build VerifiedDigitalIdentity from the<br/>SAME CandidatePool this decision used<br/>(no new I/O) -- §8"]
+    IDENT --> RET["return (WebsiteResolution, VerifiedDigitalIdentity)"]
 ```
+
+This diagram's decision logic (which candidate wins) is **byte-for-byte unchanged since before
+Sprint 1** — `resolve_with_digital_identity()` is `resolve()`'s internal implementation plus one
+extra return value, never a different decision path (see §8.1). The `VerifiedDigitalIdentity` this
+step produces is what `ranking.py` (§6.7) and `discovery_eval` (§9) consume; `DiscoveredBusiness`
+carries it as `business.identity`, `Optional[Any]` on the public DTO (kept untyped there
+deliberately — see §7's DTO note) so nothing downstream that doesn't know about Sprint 4 breaks.
 
 **`website_validator.py`** rules (verbatim constants):
 
@@ -469,10 +504,12 @@ flowchart TD
 - Retry 2 attempts; 429/503 retryable.
 - Checks content-type is `text/html` and the **post-redirect domain** isn't rejected.
 
-**`grounding.py`** provides the brand-matching math used by the Serper resolver:
-`_MIN_BRAND_WORD_LEN = 4`, `_MIN_PREFIX_WORD_LEN = 5`; `brand_match_strength` tiers —
-exact = `1.0`, prefix/suffix = `0.75 + 0.15 × coverage`, substring ratio ≥ 0.6 →
-`ratio × 0.85`; plus `is_low_signal_business_name` detection.
+**`grounding.py`** provides the brand-matching math used by both the Serper resolver and the
+Sprint 1-4 identity pipeline: `_MIN_BRAND_WORD_LEN = 4`, `_MIN_PREFIX_WORD_LEN = 5`;
+`brand_match_strength` tiers — exact = `1.0`, prefix/suffix = `0.75 + 0.15 × coverage`, substring
+ratio ≥ 0.6 → `ratio × 0.85`; plus `is_low_signal_business_name` detection. As of Sprint 3,
+`grounding.domain_root` is layered on top of `canonicalization.py` rather than parsing domains
+itself (§8.3).
 
 Legacy alternative: **`providers/brave_provider.py`** (`BraveWebsiteResolver`,
 `BRAVE_API_KEY`) is still injectable but superseded by Serper as the default resolver.
@@ -485,19 +522,26 @@ occurrences are flagged `duplicate`.
 
 ### 6.7 Step 6 — Deterministic ranking: `ranking.py`
 
-Only businesses that are `validated and not duplicate` are eligible. Verbatim weights:
+Only businesses that are `validated and not duplicate` are eligible. As of Sprint 4, every
+component below is **identity-aware with fallback**: it reads an already-computed signal off
+`business.identity` (the `VerifiedDigitalIdentity` from §6.5) when present, and falls back to the
+exact pre-Sprint-4 raw-field computation, byte-for-byte, when `business.identity is None` (e.g. a
+hand-built `DiscoveredBusiness` in a test, or a caller still on plain `resolve()`).
 
-| Signal | Points | Notes |
-|---|---|---|
-| `_HAS_WEBSITE_POINTS` | **40.0** | validated own website |
-| `_CATEGORY_MATCH_POINTS` | **20.0** | 50% partial credit via name-word overlap |
-| `_LOCATION_MATCH_POINTS` | **15.0** | 50% partial credit via domain hints |
-| `_DOMAIN_BRAND_MATCH_MAX_POINTS` | **15.0** | scaled by `brand_match_strength` |
-| `_CONTACT_COMPLETENESS_MAX_POINTS` | **15.0** | phone/address presence |
-| `_RATING_MAX_POINTS` | **10.0** | if provider gave a rating |
-| `_REVIEW_COUNT_MAX_POINTS` | **10.0** | `log1p(count) × 2.0`, capped |
+| Signal | Points | Identity-aware source (Sprint 4) | Fallback source (pre-Sprint-4, unchanged) |
+|---|---|---|---|
+| Website verification | **40.0** | `identity.verification_quality.strength`, scaled `0.6–1.0×` of max | flat 40 pts if `resolution.validated and website` |
+| Category match | **20.0** | *(no upstream equivalent — stays as-is; not a website-identity signal)* | name/category text overlap with query; 50% partial credit |
+| Location match | **15.0** | `identity.feature_store`'s `FeatureId.LOCATION_CONSISTENCY` | address/domain text overlap with query; 50% partial credit |
+| Domain/brand match | **15.0** | `FeatureId.BRAND_SIMILARITY` | `grounding.brand_match_strength(name, domain)` |
+| Contact/record completeness | **15.0** | `identity.identity_completeness.overall_score` (8 weighted dimensions) | phone/address/website 3-field presence count |
+| Rating | **10.0** | *(no upstream equivalent — stays as-is)* | `rating / 5.0 × 10` |
+| Review count | **10.0** | *(no upstream equivalent — stays as-is)* | `log1p(count) × 2.0`, capped |
+| **Identity stability** *(new in Sprint 4, no pre-Sprint-4 equivalent)* | **10.0** | `identity.quality.identity_stability` (competition margin + consensus + evidence diversity + conflict, from `identity_resolution_engine.py`) | `0.0` — purely additive when identity is unavailable |
 
-Result list is sorted by score desc, then sliced to the requested `limit`.
+Total budget is now **0–135 points** (was 0–125 before Sprint 4 — the +10 is entirely the new
+identity-stability component). Result list is sorted by score desc, then sliced to the requested
+`limit`.
 
 ### 6.8 Step 7 — Lead creation & pipeline fan-out (`discovery_service.py`)
 
@@ -512,7 +556,8 @@ For each selected business, `_create_leads_and_run_pipelines`:
 
 Outcome statuses per business (from `dto.py` → `LeadCreationOutcome`): `validated`,
 `not_selected`, `no_website`, `duplicate`, `validation_failed`, `quota_exceeded`,
-`pipeline_error`.
+`pipeline_error`. `VerifiedDigitalIdentity` is **not** exposed on `LeadCreationOutcome` or
+`DiscoveryResponse` today — see §20, gap 14.
 
 ### 6.9 Step 8 — Metrics & response
 
@@ -523,53 +568,327 @@ validated_leads, duration_ms. The client receives a `DiscoveryResponse` containi
 created leads plus every non-selected/rejected outcome with its reason.
 
 ---
-
 ## 7. Discovery Subsystem — `application/discovery/`
 
-Per-file responsibilities (the flow itself is Section 6):
+`application/discovery/` is the largest single package in the backend: 23 modules plus
+`__init__.py`, plus 5 provider modules (+ `__init__.py`) under `providers/`. It grew in four
+recognizable layers, oldest to newest:
 
-| File | Responsibility |
-|---|---|
-| `discovery_service.py` | Orchestrator; the **only** discovery file touching DB/LeadPipeline. Pipeline: parse → search → resolve/validate → dedupe → rank → create leads → run pipelines → record metrics |
-| `query_parser.py` | Deterministic NL query → `ParsedQuery` (category/location/limit/modifier); raises `QueryParseError` |
-| `locations.py` | Location gazetteer: `LOCATION_ALIASES` (12), `KNOWN_LOCATIONS` (~80 cities), `_LANDMARK_SUFFIXES` |
-| `providers/base.py` | Provider interface (search provider / website resolver contracts) |
-| `providers/overpass_provider.py` | Primary business search on OpenStreetMap; category→OSM-tag map; 4-tier location fallback |
-| `providers/serper_provider.py` | `SerperWebsiteResolver` (default website-resolution fallback) + `SerperBusinessSearchProvider` (business-search fallback); aggregator/listicle filtering |
-| `providers/brave_provider.py` | Legacy `BraveWebsiteResolver` (optional, `BRAVE_API_KEY`); superseded by Serper but injectable |
-| `providers/http_utils.py` | Shared HTTP JSON helpers with retry; `ProviderHTTPError` |
-| `website_resolver.py` | Resolution priority logic: provider website → validate → fallback resolver → validate → else `None` (never fabricate) |
-| `website_validator.py` | HTTP-level validation: status/content-type/redirect-domain checks + `REJECTED_DOMAINS` blocklist |
-| `duplicate_detector.py` | In-batch dedup by domain, else name+phone |
-| `ranking.py` | Deterministic 0–125-point scoring & ordering (weights in §6.7) |
-| `grounding.py` | Brand-name ↔ domain matching strength math shared by resolver & ranking |
-| `business_normalizer.py` | Normalizes provider payloads into `BusinessCandidate` fields (names, phones, addresses) |
-| `dto.py` | `ParsedQuery`, `BusinessCandidate`, `WebsiteResolution`, `DiscoveredBusiness`, `LeadCreationOutcome`, `DiscoveryResponse` |
-| `exceptions.py` | `DiscoveryError` → `QueryParseError`, `ProviderError(provider)`, `WebsiteValidationError` |
+1. **MVP pipeline** (query parsing → search providers → website resolution/validation →
+   dedup → ranking) — walked step-by-step in §6.
+2. **Digital Identity Pipeline, Sprints 1–4** (`evidence.py` through `digital_identity.py`) —
+   an internal, additive scoring/verification layer that sits *underneath* the MVP pipeline
+   without changing any of its public contracts. Deep dive in §8.
+3. `discovery_service.py` — the orchestrator that ties both of the above together and is the
+   only file this package exposes to `api/endpoints/discovery.py`.
+4. `discovery_eval/` — a sibling top-level package (not inside `application/discovery/` at
+   all) that offline-benchmarks layer 2 against real queries. Covered in §9.
 
-Discovery module dependency graph:
+### 7.1 File map
 
-```mermaid
-graph LR
-    DS[discovery_service.py] --> QP[query_parser.py] --> LOC[locations.py]
-    DS --> OP[overpass_provider.py] & SBP[serper_provider.py]
-    DS --> WR[website_resolver.py] --> WV[website_validator.py]
-    WR --> SWR["SerperWebsiteResolver"]
-    SWR --> GR[grounding.py]
-    DS --> DD[duplicate_detector.py] --> RK[ranking.py]
-    RK --> GR
-    OP & SBP --> HU[http_utils.py]
-    OP & SBP --> BN[business_normalizer.py]
-    DS --> DTO[dto.py]
-    DS --> EXC[exceptions.py]
-    DS -->|create leads| CRUD["core .. crud.py"]
-    DS -->|fan-out| LP["run_lead_pipeline"]
-    DS -->|metrics| OBSR["observability/repository.py"]
-```
+| File | Layer | Responsibility |
+|---|---|---|
+| `discovery_service.py` | Orchestration | `DiscoveryService.discover_and_create_leads()` — the only entry point this package exposes |
+| `dto.py` | Shared foundation | `ParsedQuery`, `BusinessCandidate`, `WebsiteResolution`, `DiscoveredBusiness` (now carries `identity: Optional[Any]`), `DiscoveryResponse`, `LeadCreationOutcome` |
+| `exceptions.py` | Shared foundation | `QueryParseError`, provider/resolution error types |
+| `query_parser.py` / `locations.py` | MVP pipeline | Free-text → `ParsedQuery` (§6.3) |
+| `providers/overpass_provider.py` | MVP pipeline | Primary business search (OpenStreetMap) |
+| `providers/serper_provider.py` | MVP pipeline | Fallback business search + website resolution (Google Serper) |
+| `providers/brave_provider.py` | MVP pipeline (legacy) | Alternative website resolver, still injectable, superseded by Serper |
+| `providers/http_utils.py`, `providers/base.py` | MVP pipeline | Shared HTTP retry helpers + provider interfaces |
+| `business_normalizer.py` | MVP pipeline | Normalizes raw Overpass tags into `BusinessCandidate` |
+| `website_resolver.py` | MVP pipeline ⇄ Identity Pipeline | `resolve()` (unchanged decision logic) + `resolve_with_digital_identity()` (Sprint 4 bridge, §8.1) |
+| `website_validator.py` | MVP pipeline | Rejects aggregator/social domains, validates reachability (§6.5) |
+| `duplicate_detector.py` | MVP pipeline | In-batch dedup by domain, else name+phone |
+| `ranking.py` | MVP pipeline ⇄ Identity Pipeline | Identity-aware scoring with byte-for-byte fallback (§6.7) |
+| `grounding.py` | Shared by both | Brand/domain match scoring, layered on `canonicalization.py` since Sprint 3 |
+| `evidence.py` | Identity Pipeline — Sprint 1 | Raw per-URL signal → structured `Evidence` |
+| `features.py` | Identity Pipeline — Sprint 2B | `Evidence` → normalized `FeatureSet` (`FeatureId`) |
+| `verification.py` | Identity Pipeline — Sprint 2B | 5 independent verifiers over a `FeatureSet` |
+| `confidence.py` | Identity Pipeline — Sprint 2B | Staged, explainable confidence propagation |
+| `identity.py` | Identity Pipeline — Sprint 2A | `BusinessIdentity` — name/website selection + `DecisionTrace` |
+| `canonicalization.py` | Identity Pipeline — Sprint 3 | Domain structure normalization (registrable domain, punycode, ports) |
+| `organization.py` | Identity Pipeline — Sprint 3 | Groups related identities into `OrganizationGroup` + `RelationshipType` |
+| `competition.py` | Identity Pipeline — Sprint 3 | Relative confidence between competing candidates + conflict flags |
+| `reliability.py` | Identity Pipeline — Sprint 3/4 | `ProviderReliabilityRegistry` — learned per-provider trust |
+| `false_positive.py` | Identity Pipeline — Sprint 3 | Structural rejection signals + cross-tenant domain reuse detection |
+| `identity_resolution_engine.py` | Identity Pipeline — Sprint 3/4 | Orchestrates canon/org/competition/reliability/false-positive into one `IdentityResolutionResult` |
+| `digital_identity.py` | Identity Pipeline — Sprint 2C | `DigitalIdentityBuilder` — the final `VerifiedDigitalIdentity` (quality + risk + consensus + status) |
+
+Full per-file line counts and test coverage: §16. Import-level dependency graph for every file
+above: §8.2 (rendered as SVG, not Mermaid — see §19 for why).
+
+### 7.2 The two pipelines' contract
+
+The single rule that keeps 23 files from becoming an unmaintainable tangle: **the Digital
+Identity Pipeline (layer 2) is read-only with respect to the MVP pipeline (layer 1).** It
+consumes `BusinessCandidate`, `WebsiteResolution`, and the `CandidatePool` that
+`WebsiteResolver.resolve()` already builds internally while deciding which website wins — it
+never influences *that* decision, and nothing in layer 1 imports anything from layer 2 except
+the two call sites documented in §6.5 (`website_resolver.py`) and §6.7 (`ranking.py`), both of
+which fall back to their exact pre-Sprint-4 behavior when no identity is available. This is why
+Sprint 4 could ship as "add digital identity to an already-shipped, already-working codebase"
+rather than a rewrite: every existing test in `tests/application/discovery/` (pre-dating this
+change) still passes unmodified against the post-Sprint-4 code, because nothing it already
+covered changed.
 
 ---
+## 8. Digital Identity Pipeline — Sprints 1-4 Deep Dive
 
-## 8. AI Lead Pipeline — `application/workflows/` + agents
+Everything in this section lives inside `application/discovery/` alongside the MVP pipeline
+(§7), but forms its own internal call graph. It answers one question per business candidate:
+**"how much should we trust that this website belongs to this business, and why?"** — and it
+answers that question the same way regardless of business category (restaurants, shoe stores,
+dentists, …), because every input into it is itself category-agnostic (see `digital_identity.py`'s
+own module docstring, quoted at multiple points below).
+
+### 8.1 The bridge: `resolve_with_digital_identity()`
+
+`website_resolver.py` has carried two public methods since Sprint 2C:
+
+- `resolve(candidate, location) -> WebsiteResolution` — the original method, decision logic
+  untouched since before Sprint 1.
+- `resolve_with_digital_identity(candidate, location) -> (WebsiteResolution, VerifiedDigitalIdentity)`
+  — same internal resolution, plus the identity object built from the same `CandidatePool` the
+  resolution already populated. **No extra network I/O.**
+
+Sprint 4's only change to `discovery_service.py` was switching `_resolve_and_validate`'s one call
+site from the first method to the second (§6.5). This is why the identity pipeline could be added
+without touching a single assertion in the pre-existing test suite: the object that changed
+(`DiscoveredBusiness.identity`) is new, additive, and `Optional[Any]` on the DTO — nothing that
+already read `DiscoveredBusiness` had to change to keep compiling or keep passing.
+
+### 8.2 Module dependency graph
+
+<a href="diagrams/discovery_module_dependency_graph.svg">
+  <img src="diagrams/discovery_module_dependency_graph.svg" width="900" alt="Discovery module dependency graph" />
+</a>
+
+*Click the image to open the full-resolution SVG in a new tab (infinitely zoomable — it's a
+vector file, not a raster screenshot). Rendered from
+`docs/diagrams/discovery_module_dependency_graph.dot` via Graphviz — regeneration command in
+§19. Blue = pre-existing MVP modules, orange = new Sprint 1-4 modules, dark = the package's one
+orchestration entry point.*
+
+### 8.3 Pipeline data flow
+
+<a href="diagrams/digital_identity_pipeline_flow.svg">
+  <img src="diagrams/digital_identity_pipeline_flow.svg" width="900" alt="Digital identity pipeline data flow" />
+</a>
+
+*Click to open full-resolution. Rendered from `docs/diagrams/digital_identity_pipeline_flow.dot`.
+This is the diagram the note in §6.1 refers to — the detail inside the sequence diagram's single
+`DI` participant.*
+
+#### Stage 1 — `evidence.py` (Sprint 1): raw signal → `Evidence`
+
+Turns each `CandidatePool` URL into an `EvidenceBundle`. `EvidenceType` has 8 members actually
+populated in Sprint 1 (`PROVIDER_FOUND`, `PROVIDER_AGREEMENT`, `PROVIDER_DISAGREEMENT`,
+`BRAND_MATCH`, `LOCATION_MATCH`, `REACHABILITY`, `HTTPS`, `CANONICAL_URL`) plus 7 more that are
+deliberately defined but never constructed yet (`PHONE_MATCH`, `ADDRESS_MATCH`,
+`SCHEMA_PRESENCE`, `ORGANIZATION_SCHEMA`, `OPENGRAPH`, `ORGANIZATION_METADATA`,
+`CONTACT_PAGE`) — reserved for a future verification engine that would need the actual page HTML
+LeadPipeline's real scrape downloads later, which nothing in Discovery has at search time.
+`EvidenceCategory` (`PROVIDER`, `IDENTITY`, `LOCATION`, `VERIFICATION`, `BUSINESS`) is the coarse
+grouping used to filter/summarize a bundle.
+
+#### Stage 2 — `features.py` (Sprint 2B): `Evidence` → `FeatureSet`
+
+Normalizes an `EvidenceBundle` into a `FeatureSet` keyed by `FeatureId` — always fully populated
+(no membership checks needed downstream): `BRAND_SIMILARITY`, `CANONICAL_DOMAIN`,
+`REACHABILITY`, `HTTPS`, `DOMAIN_QUALITY` (composite of the previous 3),
+`PROVIDER_AGREEMENT`, `LOCATION_CONSISTENCY`, `BUSINESS_COMPLETENESS`, `CONTACT_COMPLETENESS`,
+`VERIFICATION_READINESS`, `EVIDENCE_DENSITY`, and `WEBSITE_STRUCTURE` (reserved — no page is ever
+scraped at this stage, so this one always reports "not available in this pipeline" rather than a
+fabricated value).
+
+#### Stage 3 — `verification.py` (Sprint 2B): `FeatureSet` → `VerificationBundle`
+
+Five independent verifiers (domain / business / location / website / identity) each produce a
+`VerificationResult` with one of three statuses — `PASSED`, `FAILED`, or **`INCONCLUSIVE`**
+(deliberately distinct from `FAILED`: "not enough underlying feature data to decide either way,"
+never silently reported as a pass or fail when the honest answer is "unknown").
+
+#### Stage 4 — `confidence.py` (Sprint 2B): staged, explainable propagation
+
+Confidence flows **provider → website → business → identity → final**, each stage's output
+traceable back to the `FeatureSet`/`VerificationBundle` that produced it (used for
+`BusinessIdentity.decision_trace` and `VerificationTrace.explain()` in §8.4 below).
+
+#### Stage 5 — `identity.py` (Sprint 2A): `BusinessIdentity`
+
+`GenericIdentityResolver.resolve()` groups website candidates by domain
+(`WebsiteCandidateGroup`), then selects a winner and produces a `BusinessIdentity` (normalized
+name, selected website, `DecisionTrace`, `FeatureStore`). Its primary confidence figure
+(`BusinessIdentity.confidence`) comes from Stage 4's `ConfidencePropagationEngine`, computed over
+Stage 2's `FeatureSet`/`FeatureId` — **not** from this module's own, earlier `FeatureName`-based
+`extract_features()`, which Sprint 2A predates Sprint 2B by. That earlier path still runs per
+group, but only feeds a secondary `identity_verification` cross-check
+(`verify_identity_features`), not the confidence figure everything downstream reads. This is the
+one place in the pipeline where an older and newer scoring mechanism knowingly coexist — flagged
+here, and in the module's own docstring, rather than silently left ambiguous.
+
+#### Stage 6 — Sprint 3 supporting modules
+
+| Module | Produces | Purpose |
+|---|---|---|
+| `canonicalization.py` | Registrable domain, subdomain, punycode form, default-port normalization | Gives every other Sprint 3 module one consistent notion of "same domain" |
+| `organization.py` | `IdentityCandidate` → `OrganizationGroup` + `OrganizationRelationship` (via `consolidate()` / `resolve_relationships()`) | Groups related identities (e.g. a redirect, a regional mirror) instead of treating them as unrelated competitors |
+| `competition.py` | `CompetitionResult` (`compete()`) + `ConflictAssessment` (`assess_conflicts()`) | Relative confidence between candidates that *are* competing, plus explicit conflict flags |
+| `reliability.py` | `ProviderReliabilityRegistry` | Learns, from observed provider agreement over time, how much to trust each search provider — feeds `IdentityResolutionResult.provider_reliability` and (Sprint 4) `provider_operational_metrics` |
+| `false_positive.py` | Structural rejection signals | Cross-tenant domain reuse detection and other structural "this is probably not a match" signals |
+
+`organization.py`'s `RelationshipType` enum has 8 members named in the Sprint 3 brief
+(`OFFICIAL`, `ALIAS`, `MIRROR`, `REDIRECT`, `REGIONAL`, `BRANCH`, `CORPORATE`, `PRODUCT`,
+`MARKETPLACE`) — same "reserved, not fabricated" pattern as `EvidenceType`: only `REDIRECT`,
+`REGIONAL`, and `UNKNOWN` are ever actually constructed by `resolve_relationships()` today,
+because those are the only ones this pipeline currently has real signal for.
+
+#### Stage 7 — `identity_resolution_engine.py` (Sprint 3/4): `IdentityResolutionResult`
+
+`IdentityResolutionEngine.resolve()` is the single call site that invokes every Stage 6 module
+and rolls the results into one `IdentityResolutionResult`: `identity_candidates`,
+`organization_groups`, `organization_relationships`, `competition`, `conflict_assessment`,
+`provider_reliability`, `selection_confidence`, `selection_reason`, `alternative_candidates`,
+`rejected_candidate_reasons`, `identity_stability`, `evidence_diversity`, and (Sprint 4)
+`provider_operational_metrics`.
+
+#### Stage 8 — `digital_identity.py` (Sprint 2C): `VerifiedDigitalIdentity`
+
+`DigitalIdentityBuilder` combines a `BusinessIdentity` (Stage 5) with an
+`IdentityResolutionResult` (Stage 7) into the final `VerifiedDigitalIdentity`:
+
+- **`DigitalIdentityQuality`** — `identity_completeness`, `verification_strength`,
+  `evidence_density`, `provider_consensus`, `verification_coverage`, `risk_level`,
+  `missing_signals`, and Sprint-3-added `identity_stability` /
+  `evidence_diversity` (sourced straight from `IdentityResolutionResult`, never recomputed),
+  rolled into one `overall_score`.
+- **`RiskAssessment`** — a tuple of `RiskIndicator`s plus a rolled-up `risk_level` (`"none"` /
+  `"low"` / `"medium"` / `"high"`). Purely diagnostic: never fabricated, never blocking — an
+  empty `indicators` tuple is itself a meaningful "clean bill," not an omission.
+- **`VerificationTrace`** — every candidate's own `VerificationBundle` (not just the winner's),
+  so a caller can answer "why did every *other* candidate fail too," not only why the selected
+  one passed.
+- **`DigitalIdentityStatus`** — the top-line, human-facing verdict, deliberately coarser than
+  the numeric scores it derives from:
+
+  | Status | Meaning | Derivation |
+  |---|---|---|
+  | `NO_IDENTITY` | No candidate website was ever proposed | `verification_state == "no_candidates"` |
+  | `UNVERIFIED` | A candidate existed but never passed verification | `verification_state != "verified"` |
+  | `VERIFIED_WEAK` | Verified, but low quality and/or elevated risk | verified, below moderate threshold |
+  | `VERIFIED_MODERATE` | Verified, moderate quality | `overall_score >= 0.4` |
+  | `VERIFIED_STRONG` | Verified, high quality, no more than low risk | `overall_score >= 0.7` and `risk_level` in `("none", "low")` |
+
+### 8.4 What ranking.py and discovery_eval actually read
+
+Nothing downstream reaches into every field above — §6.7's ranking table shows exactly which
+four fields `ranking.py` reads (`verification_quality.strength`, two `FeatureId` entries off
+`feature_store`, `identity_completeness.overall_score`, and `quality.identity_stability`), and
+§9 covers what `discovery_eval` aggregates across a benchmark run. Everything else
+(`VerificationTrace`, `RiskAssessment.indicators`, `alternative_candidates`,
+`rejected_candidate_reasons`, …) exists today for logging/debugging and for a future API surface
+— see §20, gap 14, for the one concrete gap this leaves (none of it reaches
+`DiscoveryResponse` yet).
+
+---
+## 9. Discovery Evaluation Harness — `discovery_eval/`
+
+`discovery_eval/` is a **sibling** top-level package to `application/` — not nested inside
+`application/discovery/` — because it is a standalone, importable offline tool, not part of the
+running API/worker. It benchmarks the pipeline described in §6–§8 against a fixed, permanent
+regression query set and produces a report a human reviews; it is never invoked by
+`discovery_service.py`, `api/endpoints/discovery.py`, or any request path.
+
+```
+discovery_eval/
+├── README.md         -- usage, flags, what "good" looks like
+├── queries.py        -- ~100 fixed benchmark queries (id, query, domain, difficulty)
+├── run_eval.py        -- the runner: `python -m discovery_eval.run_eval`
+├── metrics.py         -- QueryRecord / BusinessRecord extraction + aggregate_metrics()
+├── report.py          -- CSV / JSON / Markdown report writers
+├── charts.py           -- 4 matplotlib PNGs: latency, confidence, validation_success, provider_performance
+└── tests/
+    └── test_discovery_eval.py   -- pure-logic unit tests for the 5 modules above (§18)
+```
+
+### 9.1 What it actually runs
+
+`run_eval.py` drives `DiscoveryService` as a black box, but **only through its existing internal
+stage methods** — `_search`, `_resolve_and_validate`, `_detect_duplicates`, plus the public
+`rank_businesses()` — the exact same sequence `discover_and_create_leads()` itself runs before it
+would ever create a Lead. It is constructed with `db=None` and never calls
+`discover_and_create_leads()` itself, so a full benchmark run (all ~100 queries):
+
+- creates **no** Lead rows and spends **no** subscription/lead quota,
+- triggers **no** AI enrichment, scraper, or `LeadPipeline` run,
+- still makes **real, live calls** to the production search providers (Overpass, Serper, and
+  Brave if configured) — it needs the same API keys Discovery itself needs (`SERPER_API_KEY`,
+  etc.); a missing key degrades gracefully into a low validation/resolution rate in the report
+  rather than a crash.
+
+That last point is exactly why it is **not** part of the CI `pytest` job (§6.9's CI note, §18):
+CI has no `SERPER_API_KEY` and shouldn't be making live external calls on every PR. What CI *does*
+run is `discovery_eval/tests/`, the harness's own unit tests — pure-logic coverage of
+`metrics.py`/`report.py`/`charts.py` using synthetic, no-op stub records, needing no network, no
+DB, and no provider keys.
+
+### 9.2 The 100-query benchmark set — `queries.py`
+
+Every query is plain text designed to parse under the real `QueryParser` (§6.3) — the same
+patterns a user's search box would receive. `domain` and `difficulty` are metadata for this
+harness's own reporting only; they are **never** passed into Discovery. A query that fails to
+parse isn't a bug in the dataset — `QueryParser` correctly rejecting a malformed query is itself a
+recorded, valid outcome (`QueryRecord.error`). Difficulty tags include `standard`,
+`ambiguous_name` (a short/common business name with no strong brand signal, e.g. "Regal"), and
+`alias_city` (a colloquial/former city name — Bombay, Madras, Bangalore, Gurgaon — exercising
+`locations.py`'s `LOCATION_ALIASES`, §6.3).
+
+### 9.3 Metrics — `metrics.py`
+
+Two record shapes, one per query and one per business the query considered (selected,
+not-selected, or rejected):
+
+- **`QueryRecord`** — parse result, per-stage timings (search/resolve/dedup/ranking), provider
+  count, and outcome counts (validated/rejected/duplicate/no-website).
+- **`BusinessRecord`** — everything §8 computed for that business: `winner_confidence`,
+  `identity_stability`, `competition_margin`, `competition_rival_count`,
+  `provider_agreement`, `verification_strength`, and more — **read**, never recomputed;
+  the module docstring is explicit that this file's job is extraction, not scoring.
+
+Every audit threshold is a fixed, documented, **never-learned-on-this-run's-own-data** constant —
+the same discipline Discovery's own scoring weights follow (§6.7): `WEAK_CONFIDENCE_THRESHOLD =
+0.5`, `LOW_STABILITY_THRESHOLD = 0.4`, `THIN_MARGIN_THRESHOLD = 0.05`,
+`WEAK_PROVIDER_AGREEMENT_THRESHOLD = 0.5`, `CLOSE_RANK_SCORE_DELTA = 5.0` (against `ranking.py`'s
+0–135 point budget, §6.7). `aggregate_metrics()` rolls every `QueryRecord`/`BusinessRecord` from a
+run into the run-level numbers `report.py` and `charts.py` both read.
+
+### 9.4 Reports & charts
+
+- **`report.py`** — writes `queries.csv`, `businesses.csv`, a JSON export, and a Markdown summary.
+  Every number in the Markdown report is read straight from `aggregate_metrics()`'s output;
+  recommendations are built exclusively from thresholds the run actually crossed, never invented.
+- **`charts.py`** — exactly 4 PNGs via `matplotlib` (`Agg` backend, headless-safe):
+  `latency.png`, `confidence.png`, `validation_success.png`, `provider_performance.png`. This is
+  the one place `matplotlib` is a real dependency of this repository — see the note added to
+  `requirements.txt`.
+
+### 9.5 Running it yourself
+
+```bash
+cd backend
+python -m discovery_eval.run_eval                 # full ~100-query benchmark
+python -m discovery_eval.run_eval --limit 10        # quick smoke run
+python -m discovery_eval.run_eval --concurrency 5   # override query concurrency
+```
+
+Must be run from `backend/` (the directory containing `application/`) so
+`application.discovery.*` imports resolve, and needs the same environment/API keys the production
+Discovery pipeline needs. See `discovery_eval/README.md` for the full flag list and for what a
+healthy run's numbers look like.
+
+---
+## 10. AI Lead Pipeline — `application/workflows/` + agents
 
 ### 8.1 `workflows/lead_pipeline.py` — the LangGraph graph
 
@@ -605,7 +924,7 @@ otherwise `"generate_message"`.
 2. Load the Lead — **not found → `FAILED` immediately** (no `PipelineExecutionRecord` is
    written because there is no FK target).
 3. `check_ai_features_enabled(db, organization_id)` → stored in state as
-   `ai_features_enabled` (plan gating, see §11.2).
+   `ai_features_enabled` (plan gating, see §13.2).
 4. `graph.ainvoke(initial_state)` wrapped in a safety-net `try/except` — a graph runtime
    exception is the only other path to `FAILED`.
 5. **Status rule:** `SUCCESS` iff the `errors` list is empty, else `PARTIAL_SUCCESS`.
@@ -696,7 +1015,7 @@ flowchart LR
 
 ---
 
-## 9. Application Support Modules
+## 11. Application Support Modules
 
 ### 9.1 `context/context_builder.py`
 
@@ -748,7 +1067,7 @@ plus 3 metrics-summary DTOs. All LLM-produced DTOs carry `prompt_name`, `prompt_
 
 ---
 
-## 10. Core Domain — `core/domain/`
+## 12. Core Domain — `core/domain/`
 
 ### 10.1 Models — `core/domain/models/` (SQLAlchemy)
 
@@ -794,7 +1113,7 @@ scoring-config methods are stubs.
 
 ---
 
-## 11. Core Infrastructure — `core/infrastructure/`
+## 13. Core Infrastructure — `core/infrastructure/`
 
 ### 11.1 `auth/security.py`
 
@@ -906,7 +1225,7 @@ singleton aiohttp session. Parsed output feeds `normalization/normalizer.py`.
 
 ---
 
-## 12. Observability — metrics, logging, analytics
+## 14. Observability — metrics, logging, analytics
 
 ```mermaid
 graph LR
@@ -949,7 +1268,7 @@ which **swallows refresh failures** so metrics stay available.
 
 ---
 
-## 13. Database Schema (ER Diagram)
+## 15. Database Schema (ER Diagram)
 
 ```mermaid
 erDiagram
@@ -1009,9 +1328,9 @@ Alembic**.
 
 ---
 
-## 14. Full Per-File Responsibility Table
+## 16. Full Per-File Responsibility Table
 
-Every analyzed file in `backend/` (excluding `scripts/` and `tests/`) in one place.
+Every analyzed file in `backend/` (excluding `scripts/` and `tests/`) in one place. `discovery_eval/` is included below since it sits outside `tests/` (its own `tests/` subfolder is excluded, same as everywhere else).
 
 ### Root & gateway
 
@@ -1035,7 +1354,7 @@ Every analyzed file in `backend/` (excluding `scripts/` and `tests/`) in one pla
 
 | File | Responsibility |
 |---|---|
-| `discovery/*` (13 files + 6 providers) | See §7 table — parser, providers, resolver, validator, dedup, ranking, service |
+| `discovery/*` (23 files + 5 providers) | See §7 (file map) and §8 (Digital Identity Pipeline deep dive) — parser, providers, resolver, validator, dedup, ranking, service, Sprint 1-4 identity pipeline |
 | `workflows/lead_pipeline.py` | LangGraph graph assembly + `execute` + status semantics + `run_lead_pipeline` entry |
 | `workflows/graph_nodes.py` | 10 node implementations + `_run_stage` graceful degradation |
 | `agents/base.py` | Shared agent machinery (LLM invocation pattern, explanation attachment) |
@@ -1058,6 +1377,16 @@ Every analyzed file in `backend/` (excluding `scripts/` and `tests/`) in one pla
 | `utils/retry.py` + `stage_logger.py` | Retry decorator; stage timing/logging span |
 | `dependencies.py` | Unused `get_lead_pipeline` DI provider (gap) |
 
+### `discovery_eval/`
+
+| File | Responsibility |
+|---|---|
+| `queries.py` | ~100 fixed benchmark queries (id, query, domain tag, difficulty tag) |
+| `run_eval.py` | Runner -- drives `DiscoveryService`'s own internal stage methods as a black box, no DB writes, no quota spend |
+| `metrics.py` | `QueryRecord`/`BusinessRecord` extraction + `aggregate_metrics()` -- reads Discovery's own computed values, never recomputes them |
+| `report.py` | CSV / JSON / Markdown report writers |
+| `charts.py` | 4 `matplotlib` PNGs: latency, confidence, validation success, provider performance |
+
 ### `core/`
 
 | File | Responsibility |
@@ -1067,7 +1396,7 @@ Every analyzed file in `backend/` (excluding `scripts/` and `tests/`) in one pla
 | `domain/services/scoring.py` | Deterministic weighted lead scoring + Hot/Warm/Cold/Disqualified classification |
 | `infrastructure/auth/security.py` | bcrypt+pbkdf2 hashing, JWT issue/verify, `get_current_user` chain, api-key stub |
 | `infrastructure/billing/subscription_service.py` | Plan gating (daily limits, AI/export flags), plan seeding, assign/cancel |
-| `infrastructure/billing/stripe_service.py` | Stripe SDK wrapper — partially wired (see §16) |
+| `infrastructure/billing/stripe_service.py` | Stripe SDK wrapper — partially wired (see §20) |
 | `infrastructure/database/__init__.py` | Engine, pool, `SessionLocal`, `init_db`, `get_db` |
 | `infrastructure/database/crud.py` | All raw ORM queries (single query surface) |
 | `infrastructure/enrichment/enricher.py` | 3-tier WaterfallEnricher |
@@ -1080,7 +1409,7 @@ Every analyzed file in `backend/` (excluding `scripts/` and `tests/`) in one pla
 
 ---
 
-## 15. Inter-File Dependency Map
+## 17. Inter-File Dependency Map
 
 ```mermaid
 graph TB
@@ -1141,7 +1470,177 @@ Key invariants (verified in code):
 
 ---
 
-## 16. Known Gaps & Intentional Stubs
+## 18. Testing Layout — `tests/`
+
+`pytest.ini` sets `testpaths = tests`, so **only `pytest` invoked with no path argument** is
+restricted to `tests/`; CI (`.github/workflows/ci.yml`) always passes explicit paths, so this
+only matters for a bare local `pytest` run.
+
+```
+tests/
+├── application/
+│   ├── conftest.py                 -- shared fixtures (env defaults, no autouse side effects)
+│   ├── discovery/                   -- ALL Discovery unit tests, MVP + Sprint 1-4, live here
+│   │   ├── fakes.py                  -- shared fakes for the MVP-pipeline tests
+│   │   ├── test_discovery_api.py, test_discovery_service.py, test_discovery_full_integration.py
+│   │   ├── test_query_parser.py, test_business_normalizer.py, test_duplicate_detector.py
+│   │   ├── test_website_resolver.py, test_website_validator.py, test_http_utils.py
+│   │   ├── test_overpass_provider.py, test_serper_provider.py, test_brave_provider.py
+│   │   ├── test_ranking.py                        -- black-box: overall score comparisons
+│   │   ├── test_ranking_identity_signals.py         -- white-box: internal scoring helpers (Sprint 4)
+│   │   └── test_canonicalization.py, test_competition.py, test_confidence.py,
+│   │       test_digital_identity.py, test_dto_discovered_business.py, test_evidence.py,
+│   │       test_false_positive.py, test_features.py, test_identity.py,
+│   │       test_identity_resolution_engine.py, test_organization.py, test_reliability.py,
+│   │       test_sprint3_backward_compatibility.py, test_verification.py,
+│   │       test_website_resolver_evidence.py          -- Sprint 1-4 unit tests
+│   └── ... (billing, observability, organization isolation, etc.)
+├── infrastructure/
+│   └── test_scraper.py              -- pytest-shaped, collected and run normally
+└── scraper/
+    ├── test_orchestration.py, test_parsing.py, test_playwright.py   -- standalone dev scripts,
+    │   NOT pytest-shaped (asyncio.run at import time, print()-based pass/fail counters,
+    │   expect `import scraper as S` with scraper.py on sys.path) -- intentionally
+    │   `--ignore`d by CI (§6.9), not broken by anything in this change
+```
+
+**Why the 16 Sprint 1-4 test files live in `tests/application/discovery/` and not inside
+`application/discovery/` itself:** `pytest.ini`'s `testpaths = tests` only reaches files under
+`tests/`. They were originally written under `application/discovery/tests/` alongside the source
+they cover, which is a completely reasonable layout in general — but it meant CI's
+`pytest tests/ discovery_eval/tests/ ...` invocation (§6.9) never collected them at all. Moving
+them here was the single change that made every Sprint 1-4 test actually run in CI; the test code
+itself needed no changes (no fixtures, no relative imports — every one of the 16 files uses only
+absolute `application.discovery.*` imports and takes no pytest fixture arguments).
+
+`test_ranking.py` (pre-existing, black-box: compares overall scores between two businesses) and
+the new Sprint 4 `test_ranking.py` (white-box: exercises `ranking.py`'s internal `_contact_
+completeness_score`, `_domain_brand_score`, etc. helpers directly) had the same filename; the
+Sprint 4 file was renamed to `test_ranking_identity_signals.py` on the move so both run —
+strictly more coverage, nothing dropped.
+
+`discovery_eval/tests/` (§9) deliberately stays **outside** `tests/` entirely: it's the evaluation
+package's own self-contained test suite (same convention as `scripts/test_scraper.py`, a
+standalone script kept beside the code it tests rather than under `tests/`), which is why CI names
+it explicitly as a second path rather than moving it too.
+
+---
+## 19. Diagram Tooling — Why SVG Instead of Mermaid for Large Diagrams
+
+This document still uses **Mermaid** for every diagram that was already small-to-medium (the
+layered architecture in §2, the per-workflow flowcharts and sequence diagram in §6, the ER diagram
+in §15) — GitHub renders those natively, they're easy to hand-edit inline, and they diff cleanly
+in a PR. But §8's two new diagrams (a 25+ node module dependency graph, and a full pipeline data
+flow across 12 modules) are pre-rendered **SVG files** committed under `docs/diagrams/` instead,
+referenced with a plain Markdown image tag. That split is deliberate:
+
+### 19.1 Where Mermaid-on-GitHub breaks down at scale
+
+- **No manual layout control.** Mermaid's auto-layout engine does fine with a dozen nodes; past
+  that it starts producing long diagonal crossing edges and uneven spacing with no way to nudge
+  individual nodes, because you're not choosing positions, you're choosing graph *structure* and
+  hoping the layout engine agrees.
+- **Fixed render box.** GitHub renders a Mermaid block at a size derived from the diagram's own
+  computed dimensions, inside the normal reading column width. A 25-node graph gets squeezed into
+  that box — text shrinks, edges overlap, and while GitHub's viewer does support a click-to-zoom
+  overlay, it's an extra click before a reader sees anything legible, and it doesn't help someone
+  reading the file in an IDE preview, a PR diff view, or a non-GitHub Markdown renderer at all.
+- **All-or-nothing rendering.** If GitHub's Mermaid parser trips on any construct in a large,
+  complex diagram, the whole block falls back to a raw text dump — there's no partial degradation.
+- **No native "open full size."** A static image can be opened in a new tab at full native
+  resolution, or the SVG's own vector data can be zoomed losslessly by the browser. A Mermaid
+  block has neither.
+
+### 19.2 What to use instead, by need
+
+| Need | Recommendation |
+|---|---|
+| Big architecture / dependency graphs (10+ nodes), hierarchical | **Graphviz (`dot`)** — what §8's two diagrams use. Excellent automatic hierarchical layout, full styling control via DOT, renders straight to SVG, `dot` ships in `apt`/most CI images already |
+| Same, but you want a nicer modern syntax to hand-write | **D2** (`terrastruct/d2`) — text-based like Mermaid, but purpose-built to export crisp static SVG/PNG rather than render live in a chat/markdown widget; handles larger graphs more gracefully than Mermaid's layout engine |
+| Hand-tuned layouts where exact node position matters | **draw.io / diagrams.net** — design visually, export SVG/PNG; GitHub can also open `.drawio` files for future editing if you commit the source file alongside the exported image |
+| Formal C4-model / enterprise architecture diagrams | **Structurizr** or **C4-PlantUML** |
+| Diagrams that must stay small enough for Mermaid to still be worth it | Keep Mermaid — it's still the right tool for the sequence/flowcharts in §6 and the ER diagram in §15 |
+
+The common thread: **for anything that's outgrown Mermaid, render it to a static SVG file and
+commit the image**, rather than trying to force GitHub's live Mermaid renderer to cope with a
+diagram it wasn't sized for.
+
+### 19.3 How §8's two diagrams were built (and how to regenerate them)
+
+Graphviz was already available in this environment (`dot -V` → 2.43.0), so no new tooling
+dependency was introduced. Source files:
+
+```
+docs/diagrams/
+├── discovery_module_dependency_graph.dot   -- §8.2's diagram
+├── discovery_module_dependency_graph.svg    -- rendered output, what the doc actually embeds
+├── digital_identity_pipeline_flow.dot        -- §8.3's diagram
+└── digital_identity_pipeline_flow.svg         -- rendered output
+```
+
+To regenerate either one after editing the `.dot` source:
+
+```bash
+cd backend/docs/diagrams
+dot -Tsvg discovery_module_dependency_graph.dot -o discovery_module_dependency_graph.svg
+dot -Tsvg digital_identity_pipeline_flow.dot -o digital_identity_pipeline_flow.svg
+```
+
+Both `.dot` files are plain text and diff cleanly in a PR, same as a Mermaid block would — the
+only difference from Mermaid is a one-command render step before the SVG is committed, in
+exchange for a diagram that stays legible at any size on GitHub, in an IDE, or opened directly.
+
+### 19.4 Installing Graphviz
+
+The `dot` command is a separate binary from Python/Node — installing the `graphviz` **Python**
+package alone (`pip install graphviz`) is not enough, it's just a thin wrapper that still shells
+out to the real `dot` executable. Install the actual binary:
+
+| Environment | Command |
+|---|---|
+| WSL2 / native Ubuntu / Debian | `sudo apt-get update && sudo apt-get install -y graphviz` |
+| macOS (Homebrew) | `brew install graphviz` |
+| Native Windows | `choco install graphviz` (Chocolatey), or download the installer from `graphviz.org/download/` and add its `bin/` folder to `PATH` |
+| Verify (any platform) | `dot -V` → should print `dot - graphviz version 2.4x.x` |
+
+Given your `git status` output from earlier shows you working inside WSL2 Ubuntu
+(`DESKTOP-DTDQP40`, `.venv` under `/mnt/g/DEV/projects/LeadBoost-saas-github`), the first row
+applies to you — run `sudo apt-get install -y graphviz` once inside that WSL shell (not inside
+the Python venv — it's a system package, not a pip package), then the `dot -Tsvg ...` commands
+in §19.3 will work directly from your existing terminal.
+
+### 19.5 Keeping large diagrams a reasonable size
+
+A hand-written `.dot` file with generous `nodesep`/`ranksep` can lay out to a huge canvas once
+Graphviz has 25+ nodes to place — the two diagrams above originally rendered at roughly
+2860×2220pt and 5290×520pt respectively, which is far wider than a GitHub content column, so
+the default inline preview would shrink to illegibly small before any zoom. Two independent
+fixes, both used here:
+
+1. **Cap the physical canvas** with the graph attributes `size="15,11!"` (max width/height in
+   inches — the `!` forces Graphviz to actually shrink to fit rather than only using it as a
+   suggestion) and `ratio=compress` (repacks node spacing to fit that box, rather than just
+   rescaling after the fact — this is what took the dependency graph from ~2860×2220pt down to
+   ~980×790pt without losing any node or edge). Add these two lines inside the `graph [ ... ]`
+   block at the top of the `.dot` file, right next to `rankdir`.
+2. **Constrain the *display* width independently of the file's own dimensions**, via the
+   `<img width="900">` HTML embed used in §8.2/§8.3 above, wrapped in an `<a href="...">` pointing
+   at the same file — GitHub renders the HTML `width` attribute directly (plain Markdown
+   `![]()` image syntax has no way to set this), so the inline preview is a predictable, readable
+   size regardless of the SVG's native dimensions, and clicking it opens the full file at full
+   resolution in a new tab. `width="900"` is a reasonable default for a document with normal-width
+   prose around it — drop it lower (e.g. `600`) for a narrower page, or raise it if the diagram
+   still reads as cramped.
+
+If a diagram is complex enough that even a capped/compressed layout is still hard to follow at
+any single size, the better fix is usually to split it into two smaller diagrams along its
+natural seams (e.g. §8.3's pipeline could split into "raw signal → BusinessIdentity" and
+"BusinessIdentity → VerifiedDigitalIdentity") rather than continuing to shrink the same
+25-node diagram — a diagram that needs a magnifying glass to read is a diagram that's trying to
+show too much in one image, independent of file format.
+
+---
+## 20. Known Gaps & Intentional Stubs
 
 All verified in code — useful when extending the system:
 
@@ -1160,9 +1659,13 @@ All verified in code — useful when extending the system:
 | 11 | Per-organization scoring configuration methods are stubs; `ScoringModelType` has unused variants | `core/domain/services/scoring.py` |
 | 12 | Messenger only generates outreach text — no email/LinkedIn sending exists anywhere | `core/infrastructure/messaging/messenger.py` |
 | 13 | `CAN_USE_AI_*` defaults are all `"false"` — AI enrich/messaging stages are skipped unless env explicitly enables them | `core/infrastructure/billing/subscription_service.py` |
+| 14 | `DiscoveredBusiness.identity` (`VerifiedDigitalIdentity`) never reaches the API layer -- `DiscoveryResponse` / `LeadCreationOutcome` expose no identity/quality/risk fields, so a client can't see *why* a business ranked where it did | `application/discovery/dto.py` |
+| 15 | `identity.py`'s legacy `FeatureName`/`extract_features()` path still runs per candidate group but only feeds a secondary `identity_verification` cross-check -- `BusinessIdentity.confidence` itself comes entirely from the newer `features.py`/`confidence.py` engines | `application/discovery/identity.py` |
+| 16 | Most `EvidenceType` (7 of 15) and `RelationshipType` (6 of 9) members are defined but never constructed -- reserved for signals (schema.org, OpenGraph, contact-page presence) that need real page HTML only LeadPipeline's scrape downloads, which Discovery doesn't have at search time | `application/discovery/evidence.py`, `organization.py` |
+| 17 | `discovery_eval` is never wired into CI as a live benchmark (only its own unit tests are, §9/§18) -- running the ~100-query benchmark against production providers is a manual/on-demand step, not a merge gate | `discovery_eval/run_eval.py` |
+| 18 | `ranking.py`'s three purely name/rating/review-derived signals (category match, rating, review count = 40 of 135 points) have no `VerifiedDigitalIdentity` equivalent yet -- only 5 of 8 scoring components are identity-aware | `application/discovery/ranking.py` |
 
 ---
 
 *Generated from direct source analysis. Companion docs: `ARCHITECTURE.md`,
 `DISCOVERY.md`, `MONITORING.md`, `ENVIRONMENT.md` in this folder.*
-

@@ -14,6 +14,7 @@ repository abstraction, just colocated here because they are
 application/AI-context-specific reads rather than general-purpose CRUD.
 """
 
+import json
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
@@ -138,6 +139,78 @@ def get_recent_ai_decision_logs(
     if stage:
         query = query.filter(AIDecisionLog.stage == stage)
     return query.order_by(AIDecisionLog.created_at.desc()).limit(limit).all()
+
+
+# Stages whose AIDecisionLog row carries reasoning/evidence/confidence in
+# separate columns (the agent's DTO was stored with `exclude={"explanation"}`
+# -- see graph_nodes.py) and therefore needs the explanation re-attached.
+# "evaluation" and "review" store their full DTO already (no `explanation`
+# field on those two DTOs), so they are read back as-is.
+_STAGES_WITH_SEPARATE_EXPLANATION = {"company_intelligence", "decision", "messaging"}
+
+
+def _ai_decision_log_to_output(row: AIDecisionLog) -> Optional[Dict[str, Any]]:
+    """Reconstructs the JSON shape of the agent's own DTO
+    (CompanyIntelligenceOutput / DecisionOutput / EvaluationReport /
+    ReviewOutput / MessagingOutput -- see application/dto/models.py) from
+    one AIDecisionLog row, so the API can expose exactly what the agent
+    produced without recomputing or duplicating any AI logic."""
+    if row is None:
+        return None
+
+    output: Dict[str, Any] = {}
+    if row.output_data:
+        try:
+            output = json.loads(row.output_data)
+        except (TypeError, ValueError):
+            output = {}
+
+    if row.stage in _STAGES_WITH_SEPARATE_EXPLANATION:
+        evidence: List[str] = []
+        if row.evidence:
+            try:
+                evidence = json.loads(row.evidence)
+            except (TypeError, ValueError):
+                evidence = [row.evidence]
+        output["explanation"] = {
+            "reasoning": row.reasoning or "",
+            "evidence": evidence,
+            "confidence": row.confidence or 0.0,
+        }
+
+    output["model_used"] = row.model_used
+    output["generated_at"] = row.created_at.isoformat() if row.created_at else None
+    return output
+
+
+def get_lead_ai_insights(db: Session, lead_id: int) -> Dict[str, Optional[Dict[str, Any]]]:
+    """Builds the lead-detail "AI insights" bundle exposed by
+    GET /api/v2/leads/{id} (integration audit items #3-#7).
+
+    Company Intelligence, Decision reasoning/action, the Evaluation
+    breakdown, and full Messaging output are all already computed by the
+    pipeline and already persisted -- as AIDecisionLog rows written by
+    application.memory.db_memory.SQLBusinessMemory.store() during each
+    pipeline stage (see application/workflows/graph_nodes.py). They were
+    simply never read back out for the API response. This is the read
+    side of that existing, unmodified write path: no agent, prompt, or
+    scoring logic changes here, just the latest row per stage,
+    deserialized. Returns None for any stage that hasn't run yet for this
+    lead (e.g. `messaging` when the lead was routed to human_review and
+    message generation was intentionally skipped).
+
+    `technologies` (integration audit item #3) is intentionally NOT a
+    separate field/column: it already reaches here inside
+    `company_intelligence["technology_signals"]`, and nothing in the
+    codebase (no CRUD filter, no API query param, no test) requires it to
+    be independently searchable/filterable, so no schema change is made.
+    """
+    stages = ("company_intelligence", "decision", "evaluation", "review", "messaging")
+    insights: Dict[str, Optional[Dict[str, Any]]] = {}
+    for stage in stages:
+        rows = get_recent_ai_decision_logs(db, lead_id, stage=stage, limit=1)
+        insights[stage] = _ai_decision_log_to_output(rows[0]) if rows else None
+    return insights
 
 
 def get_previous_leads_for_organization(

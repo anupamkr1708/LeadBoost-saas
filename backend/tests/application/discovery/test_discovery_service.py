@@ -77,6 +77,17 @@ def _service(db_session, candidates, fallback_mapping=None, search_raises=False)
         search_provider=_StubSearchProvider(candidates, raise_error=search_raises),
         resolver_fallback=_StubFallback(fallback_mapping or {}),
         validator=_AllOkValidator(),
+        # Bug fix: every other component here is a pure stub -- this one
+        # was the sole exception, silently defaulting to a real
+        # SerperBusinessSearchProvider() (see DiscoveryService.__init__)
+        # that would attempt a live network call whenever a test using
+        # this helper passed candidates=[] (e.g.
+        # test_search_provider_failure_degrades_gracefully). Explicitly
+        # disabling it here keeps every test built on `_service()`
+        # hermetic; tests that intend to exercise the fallback construct
+        # DiscoveryService directly with their own stub, as they already
+        # do (see business_search_fallback=fallback below).
+        business_search_fallback=None,
     )
 
 

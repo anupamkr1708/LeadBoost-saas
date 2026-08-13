@@ -19,6 +19,15 @@ os.environ.setdefault("GROQ_API_KEY", "")  # force deterministic/heuristic agent
 os.environ.setdefault("CAN_USE_AI_FREE", "true")
 os.environ.setdefault("CAN_USE_AI_PRO", "true")
 os.environ.setdefault("CAN_USE_AI_ENTERPRISE", "true")
+# Neutral by default so no test's outcome silently depends on whatever
+# ENABLE_AI_FOR_ALL_PLANS happens to be in the developer's local .env
+# (core.infrastructure.database.__init__ calls load_dotenv() the first
+# time anything imports it, which happens lazily from inside fixtures --
+# after this module's own setdefault calls, so this wins as long as it's
+# not already exported in the shell before pytest starts; the one test
+# that specifically needs this pinned regardless of the shell too also
+# monkeypatches it directly -- see test_subscription_service.py).
+os.environ.setdefault("ENABLE_AI_FOR_ALL_PLANS", "false")
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 

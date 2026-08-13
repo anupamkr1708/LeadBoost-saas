@@ -49,6 +49,17 @@ def test_canceled_subscription_reverts_to_free_tier_limits(db_session, sample_or
     monkeypatch.delenv("FREE_MAX_LEADS_PER_DAY", raising=False)
     monkeypatch.setenv("CAN_USE_AI_ENTERPRISE", "true")
     monkeypatch.setenv("CAN_USE_AI_FREE", "false")
+    # This test's whole point is asserting can_use_ai_features() is False
+    # on the free tier, which the local-dev AI bypass (see
+    # SubscriptionService.can_use_ai_features) is explicitly designed to
+    # override. conftest.py doesn't otherwise touch this var, so it was
+    # silently inheriting whatever ENABLE_AI_FOR_ALL_PLANS happens to be
+    # set to in the ambient environment/.env pytest is run from -- a real
+    # false positive/negative risk, unrelated to what this test is
+    # actually meant to verify. monkeypatch.setenv always wins over both
+    # an exported shell var and a `.env`-loaded one, and reverts
+    # automatically after the test.
+    monkeypatch.setenv("ENABLE_AI_FOR_ALL_PLANS", "false")
 
     service = SubscriptionService(db_session)
     service.assign_plan_to_organization(sample_org.id, "enterprise")

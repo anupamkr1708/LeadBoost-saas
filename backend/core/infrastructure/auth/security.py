@@ -112,6 +112,48 @@ def verify_token(token: str) -> dict:
         )
 
 
+def verify_refresh_token(token: str) -> dict:
+    """Same shape/contract as verify_token(), but for refresh tokens.
+
+    Bug fix: POST /refresh (api/endpoints/auth.py) used to call
+    verify_token() on the refresh token it was handed. verify_token()
+    unconditionally requires token_type == "access" (correctly so -- it's
+    also what get_current_user() uses to gate every protected endpoint,
+    and a refresh token must never be accepted there). Since
+    create_refresh_token() always encodes {"type": "refresh"}, every
+    single call to /refresh was guaranteed to fail verify_token()'s type
+    check, get caught by /refresh's own broad `except Exception`, and
+    come back as a 401 "Invalid refresh token" -- for every user, every
+    time, with no way to ever succeed. In practice this meant the
+    frontend's silent-refresh-on-401 flow (src/lib/api-client.ts) always
+    failed and logged the user out the moment their 30-minute access
+    token expired, regardless of how fresh their refresh token was.
+    verify_token() itself is left untouched (its access-only check is
+    correct and still guards get_current_user); this is a separate,
+    parallel check for the one caller that legitimately needs to accept
+    a refresh token instead.
+    """
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id: int = payload.get("sub")
+        token_type: str = payload.get("type")
+
+        if user_id is None or token_type != "refresh":
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid refresh token",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        return {"user_id": user_id, "token_type": token_type}
+    except jwt.PyJWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid refresh token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db),

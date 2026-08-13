@@ -1,0 +1,2 @@
+query_id,query,domain_tag,difficulty_tag,discovery_error,businesses_found,validated_businesses,sites_pushed_to_pipeline,sites_success,sites_partial_success,sites_failed,avg_score,qualification_labels
+retail-01,shoe stores in Mumbai,Retail,standard,,6,5,1,1,0,0,25.9,Disqualified

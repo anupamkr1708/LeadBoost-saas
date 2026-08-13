@@ -203,7 +203,7 @@ class CompanyIntelligenceAgent(BaseAgent):
             messages,
             inputs=prompt_inputs,
             temperature=0.1,
-            max_tokens=700,
+            max_tokens=2200,
         )
         if payload is None:
             return None

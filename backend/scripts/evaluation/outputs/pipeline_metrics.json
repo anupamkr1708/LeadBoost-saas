@@ -1,0 +1,264 @@
+{
+  "generated_at": "2026-08-05T15:57:40.213863+00:00",
+  "discovery": {
+    "total_queries": 1,
+    "ok_queries": 1,
+    "failed_queries": 0,
+    "failed_query_ids": [],
+    "parse_success_rate": 1.0,
+    "avg_latency_ms": 5691.0,
+    "median_latency_ms": 5691,
+    "p95_latency_ms": 5691,
+    "p99_latency_ms": 5691,
+    "total_businesses_found": 6,
+    "total_validated": 5,
+    "total_rejected": 0,
+    "total_duplicates": 1,
+    "total_no_website": 0,
+    "total_validation_failures": 0,
+    "validation_success_rate": 0.8333,
+    "website_resolution_success_rate": 1.0,
+    "duplicate_rate": 0.1667,
+    "validation_failure_rate": 0.0,
+    "provider_agreement_rate": 1.0,
+    "avg_confidence": 0.706,
+    "avg_identity_stability": 0.621,
+    "avg_competition_margin": 0.0,
+    "avg_provider_agreement": 0.5,
+    "provider_candidate_counts": {
+      "serper_business_search": 6
+    },
+    "queries_no_competing_candidate": [
+      "retail-01"
+    ],
+    "queries_no_results": [],
+    "queries_no_validated_results": [],
+    "queries_multiple_strong_candidates": [
+      "retail-01"
+    ],
+    "queries_manual_review": [
+      "retail-01"
+    ],
+    "directory_marketplace_selected_count": 0,
+    "social_profile_selected_count": 0,
+    "structural_false_positive_count": 2,
+    "discovery_health_score": 83.2,
+    "official_domain_precision": 1.0
+  },
+  "scraper": {
+    "sites_attempted": 1,
+    "scrape_success_rate": 0.0,
+    "blocked_rate": 1.0,
+    "fallback_tier_usage_counts": {
+      "structured_data": 1,
+      "curl_cffi": 1,
+      "playwright": 1,
+      "requests": 1
+    },
+    "final_method_counts": {},
+    "avg_pages_scraped": null,
+    "multi_page_enrichment_rate": 0.0,
+    "structured_extraction_coverage": 0.0,
+    "confidence_distribution": {
+      "n": 1,
+      "avg": 0.2,
+      "median": 0.2,
+      "min": 0.2,
+      "max": 0.2
+    },
+    "latency_ms": {
+      "avg_ms": 17837.0,
+      "median_ms": 17837,
+      "p95_ms": 17837,
+      "n": 1
+    }
+  },
+  "normalizer": {
+    "sites_normalized": 1,
+    "field_completeness_pct": {
+      "organization_type": 100.0,
+      "brand_name": 100.0,
+      "description": 100.0,
+      "founded_year": 100.0,
+      "employee_count": 0.0,
+      "emails": 0.0,
+      "phones": 100.0,
+      "address": 100.0,
+      "operating_regions": 100.0,
+      "products": 0.0,
+      "services": 0.0,
+      "social_profiles": 100.0,
+      "technologies": 100.0
+    },
+    "organization_type_coverage": 100.0,
+    "address_coverage": 100.0,
+    "social_coverage": 100.0,
+    "technology_coverage": 100.0,
+    "confidence_distribution": {
+      "n": 11,
+      "avg": 0.8591,
+      "median": 0.9,
+      "min": 0.6,
+      "max": 0.95
+    },
+    "latency_ms": {
+      "avg_ms": 1.0,
+      "median_ms": 1,
+      "p95_ms": 1,
+      "n": 1
+    }
+  },
+  "enricher": {
+    "sites_eligible": 1,
+    "enrichment_coverage": 1.0,
+    "method_distribution_pct": {
+      "heuristic": 100.0
+    },
+    "deterministic_contribution_rate": 1.0,
+    "external_api_contribution_rate": 0.0,
+    "llm_contribution_rate": 0.0,
+    "merged_contribution_rate": 0.0,
+    "llm_fallback_rate_upper_bound": 0.0,
+    "evidence_field_completeness_pct": {
+      "business_type": 100.0,
+      "technologies": 100.0,
+      "operating_regions": 100.0,
+      "offerings": 0.0,
+      "primary_contact": 100.0
+    },
+    "confidence_distribution": {
+      "n": 1,
+      "avg": 0.7296,
+      "median": 0.7296,
+      "min": 0.7296,
+      "max": 0.7296
+    },
+    "latency_ms": {
+      "avg_ms": 3.0,
+      "median_ms": 3,
+      "p95_ms": 3,
+      "n": 1
+    }
+  },
+  "company_intelligence": {
+    "sites_analyzed": 1,
+    "source_distribution_pct": {
+      "llm": 100.0
+    },
+    "heuristic_usage_rate": 0.0,
+    "llm_usage_rate": 1.0,
+    "explainability_coverage": 1.0,
+    "grounded_technology_precision": 1.0,
+    "hallucination_check": {
+      "heuristic_results_checked": 0,
+      "invariant_violations": [],
+      "status": "PASS"
+    },
+    "icp_alignment_distribution": {
+      "n": 1,
+      "avg": 0.6,
+      "median": 0.6,
+      "min": 0.6,
+      "max": 0.6
+    },
+    "latency_ms": {
+      "avg_ms": 3385.0,
+      "median_ms": 3385,
+      "p95_ms": 3385,
+      "n": 1
+    }
+  },
+  "lead_scoring": {
+    "leads_scored": 1,
+    "score_distribution": {
+      "n": 1,
+      "avg": 25.9446,
+      "median": 25.9446,
+      "min": 25.9446,
+      "max": 25.9446
+    },
+    "qualification_distribution_pct": {
+      "Disqualified": 100.0
+    },
+    "criterion_avg_contribution": {
+      "industry_match": 15.0,
+      "company_size": 0.0,
+      "email_quality": 0.0,
+      "scrape_quality": 0.0,
+      "enrichment_quality": 10.9446,
+      "linkedin_presence": 0.0
+    },
+    "explainability_coverage": 0.0,
+    "latency_ms": {
+      "avg_ms": 0.0,
+      "median_ms": 0,
+      "p95_ms": 0,
+      "n": 1
+    }
+  },
+  "pipeline": {
+    "sites_processed": 1,
+    "end_to_end_success_rate": 1.0,
+    "partial_success_rate": 0.0,
+    "failure_rate": 0.0,
+    "stage_completion_rate": {
+      "scrape": 0.0,
+      "normalize": 1.0,
+      "enrich": 1.0,
+      "company_intelligence": 1.0,
+      "scoring": 1.0
+    },
+    "per_stage_latency_ms": {
+      "scrape": {
+        "avg_ms": 17837.0,
+        "median_ms": 17837,
+        "p95_ms": 17837,
+        "n": 1
+      },
+      "normalize": {
+        "avg_ms": 1.0,
+        "median_ms": 1,
+        "p95_ms": 1,
+        "n": 1
+      },
+      "enrich": {
+        "avg_ms": 3.0,
+        "median_ms": 3,
+        "p95_ms": 3,
+        "n": 1
+      },
+      "company_intelligence": {
+        "avg_ms": 3385.0,
+        "median_ms": 3385,
+        "p95_ms": 3385,
+        "n": 1
+      },
+      "scoring": {
+        "avg_ms": 0.0,
+        "median_ms": 0,
+        "p95_ms": 0,
+        "n": 1
+      }
+    },
+    "end_to_end_latency_ms": {
+      "avg_ms": 21226.0,
+      "median_ms": 21226,
+      "p95_ms": 21226,
+      "n": 1
+    },
+    "failures_by_stage": {
+      "scrape": [],
+      "normalize": [],
+      "enrich": [],
+      "company_intelligence": [],
+      "scoring": []
+    },
+    "confidence_propagation": {
+      "scrape": 0.2,
+      "normalize": 0.8591,
+      "enrich": 0.7296,
+      "company_intelligence": 0.6
+    },
+    "evidence_preservation_rate": 1.0
+  }
+}

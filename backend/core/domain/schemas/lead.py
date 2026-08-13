@@ -3,7 +3,7 @@ Pydantic schemas for Lead model
 """
 
 from pydantic import BaseModel
-from typing import Optional
+from typing import Any, Dict, Optional
 from datetime import datetime
 
 
@@ -94,6 +94,31 @@ class Lead(LeadInDBBase):
 
 class LeadInDB(LeadInDBBase):
     pass
+
+
+class LeadDetail(Lead):
+    """Response schema for GET /api/v2/leads/{id} only (integration audit
+    items #3-#7). Purely additive on top of `Lead`: every existing field
+    and its type is unchanged, so this is backward-compatible for any
+    existing consumer of the plain `Lead` shape.
+
+    `ai_insights` surfaces the AI outputs that were already being
+    computed and persisted (to AIDecisionLog) but never reached this
+    response -- Company Intelligence, Decision reasoning/action, the
+    Evaluation confidence/completeness/grounding/consistency breakdown,
+    Review routing, and full Messaging output (subject/body/LinkedIn
+    opener/follow-up strategy, not just the stored `outreach_message`
+    body). See application.services.infra_adapters.get_lead_ai_insights.
+
+    Left as `Dict[str, Any]` per stage (rather than importing the
+    application-layer DTOs here) so this schema stays a pure read model:
+    it always mirrors exactly what the agent produced, with no risk of
+    the two shapes drifting apart. Any stage that has not run yet for
+    this lead (e.g. `messaging` when routed to human_review) is `None`,
+    not an error.
+    """
+
+    ai_insights: Optional[Dict[str, Optional[Dict[str, Any]]]] = None
 
 
 class LeadEnrichmentLogBase(BaseModel):

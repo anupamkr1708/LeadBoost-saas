@@ -1,0 +1,6 @@
+stage,n,rate_pct,avg_ms,median_ms,p95_ms
+scrape,1,0.0,17837.0,17837,17837
+normalize,1,100.0,1.0,1,1
+enrich,1,100.0,3.0,3,3
+company_intelligence,1,100.0,3385.0,3385,3385
+scoring,1,100.0,0.0,0,0

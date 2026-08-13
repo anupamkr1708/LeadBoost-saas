@@ -95,6 +95,22 @@ from core.infrastructure.logging import get_logger
 
 logger = get_logger("application.discovery.service")
 
+# Bug fix: `business_search_fallback: Optional[...] = None` cannot, by
+# itself, tell "the caller explicitly passed None to disable the
+# fallback" apart from "the caller didn't pass anything" -- both look
+# identical inside __init__ once the parameter's value is None. The
+# result (found via a real, previously-hanging pytest run of
+# test_fallback_disabled_when_explicitly_none, and a real failure of
+# test_search_provider_failure_degrades_gracefully) was that
+# `business_search_fallback=None` -- and simply omitting the argument,
+# which every other caller in this file's own test suite does --
+# silently constructed a real `SerperBusinessSearchProvider()` and
+# attempted a live network call, exactly contradicting the module
+# docstring and the __init__ comment below that both promise `None`
+# disables it. This sentinel is the only way to distinguish the two
+# cases; see its two uses in __init__.
+_FALLBACK_NOT_PASSED = object()
+
 
 class DiscoveryService:
     def __init__(
@@ -103,7 +119,7 @@ class DiscoveryService:
         search_provider: Optional[BusinessSearchProvider] = None,
         resolver_fallback: Optional[WebsiteResolverProvider] = None,
         validator: Optional[WebsiteValidator] = None,
-        business_search_fallback: Optional[BusinessSearchProvider] = None,
+        business_search_fallback: Optional[BusinessSearchProvider] = _FALLBACK_NOT_PASSED,  # type: ignore[assignment]
         session: Optional[aiohttp.ClientSession] = None,
         reliability_registry: Optional[ProviderReliabilityRegistry] = None,
         domain_observations: Optional[DomainObservationRegistry] = None,
@@ -136,9 +152,14 @@ class DiscoveryService:
         )
         # Only ever used when self.search_provider returns zero candidates
         # -- see the module docstring and _search below. Pass
-        # business_search_fallback=None explicitly to disable it outright.
+        # business_search_fallback=None explicitly to disable it outright
+        # (omit the argument entirely to get the real default instead --
+        # see _FALLBACK_NOT_PASSED above for why these two are not the
+        # same thing).
         self.business_search_fallback = (
-            business_search_fallback if business_search_fallback is not None else SerperBusinessSearchProvider()
+            SerperBusinessSearchProvider()
+            if business_search_fallback is _FALLBACK_NOT_PASSED
+            else business_search_fallback
         )
         self.max_concurrent_pipelines = max(
             1, int(os.getenv("DISCOVERY_MAX_CONCURRENT_PIPELINES", "3"))
@@ -173,7 +194,13 @@ class DiscoveryService:
         self._owns_search_provider = search_provider is None
         self._owns_resolver_fallback = resolver_fallback is None
         self._owns_validator = validator is None
-        self._owns_business_search_fallback = business_search_fallback is None
+        # Only "owns" (and therefore should manage the session lifecycle
+        # of) a fallback provider it constructed itself -- i.e. the
+        # argument was omitted. When the caller explicitly disabled it
+        # (business_search_fallback=None), self.business_search_fallback
+        # is None too and there's nothing to own. See _FALLBACK_NOT_PASSED
+        # above.
+        self._owns_business_search_fallback = business_search_fallback is _FALLBACK_NOT_PASSED
 
     async def _ensure_shared_session(self) -> Optional[aiohttp.ClientSession]:
         """Lazily creates (once) the one shared aiohttp session this

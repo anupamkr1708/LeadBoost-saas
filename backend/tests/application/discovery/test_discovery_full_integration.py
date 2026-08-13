@@ -84,11 +84,20 @@ def test_full_discovery_flow_via_http(client, monkeypatch):
         # rely on OverpassProvider always POSTing and WebsiteValidator
         # always GETting, and return the right canned response per verb.
         class _Router:
+            closed = False
+
             def post(self, *a, **kw):
                 return overpass_response
 
             def get(self, *a, **kw):
                 return validator_response
+
+            async def close(self):
+                # Matches aiohttp.ClientSession's interface: DiscoveryService.aclose()
+                # (see application/discovery/discovery_service.py) now actually gets
+                # called on every request (api/endpoints/discovery.py), which this
+                # fake previously didn't need to support.
+                self.closed = True
 
             async def __aenter__(self):
                 return self

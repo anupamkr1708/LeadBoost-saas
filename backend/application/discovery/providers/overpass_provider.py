@@ -280,9 +280,27 @@ class OverpassProvider(BusinessSearchProvider):
 
     @with_retry(exceptions=(aiohttp.ClientError, TimeoutError), attempts=2, min_wait=1.0, max_wait=3.0)
     async def _fetch_with_retry(self, query: str) -> list:
+        # Bug fix: overpass-api.de began rejecting requests with no (or a
+        # generic library-default) User-Agent with HTTP 406 -- a change on
+        # their end affecting many unrelated clients (QGIS, python-overpy,
+        # etc.), not something specific to this codebase. Neither POST
+        # call below set any headers at all, so every request here was
+        # going out with aiohttp's bare default User-Agent. A descriptive
+        # one (contact info per Overpass's own usage-policy convention)
+        # is the documented fix. If overpass-api.de is still degraded for
+        # other reasons, OVERPASS_API_URL can point at a mirror (e.g.
+        # https://overpass.kumi.systems/api/interpreter) with no code
+        # change.
+        headers = {
+            "User-Agent": os.getenv(
+                "OVERPASS_USER_AGENT",
+                "LeadBoost-Discovery/1.0 (+https://github.com/; contact: set OVERPASS_USER_AGENT)",
+            )
+        }
         if self.session is not None:
             async with self.session.post(
-                self.api_url, data=query, timeout=aiohttp.ClientTimeout(total=self.timeout)
+                self.api_url, data=query, headers=headers,
+                timeout=aiohttp.ClientTimeout(total=self.timeout)
             ) as response:
                 if response.status != 200:
                     raise aiohttp.ClientError(f"Overpass returned HTTP {response.status}")
@@ -291,7 +309,7 @@ class OverpassProvider(BusinessSearchProvider):
         async with aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=self.timeout)
         ) as owned_session:
-            async with owned_session.post(self.api_url, data=query) as response:
+            async with owned_session.post(self.api_url, data=query, headers=headers) as response:
                 if response.status != 200:
                     raise aiohttp.ClientError(f"Overpass returned HTTP {response.status}")
                 payload = await response.json(content_type=None)

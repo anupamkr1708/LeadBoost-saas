@@ -189,6 +189,30 @@ class LeadPipelineNodes:
                         if "linkedin.com" in link:
                             update_fields["linkedin_url"] = link
                             break
+                # Bug fix (integration audit #1, #2): the scraper already
+                # extracts twitter_url/facebook_url/address (see
+                # core/infrastructure/scraping/scraper.py) and both columns
+                # exist on the Lead model + are already accepted by
+                # LeadUpdate (core/domain/schemas/lead.py), but this stage
+                # never copied them from `data` into `update_fields`, so
+                # they stayed NULL in the database no matter what the
+                # scraper found. Mirrors the linkedin_url handling above.
+                if data.get("twitter_url"):
+                    update_fields["twitter_url"] = data["twitter_url"]
+                else:
+                    for link in data.get("links", []) or []:
+                        if "twitter.com" in link or "x.com" in link:
+                            update_fields["twitter_url"] = link
+                            break
+                if data.get("facebook_url"):
+                    update_fields["facebook_url"] = data["facebook_url"]
+                else:
+                    for link in data.get("links", []) or []:
+                        if "facebook.com" in link:
+                            update_fields["facebook_url"] = link
+                            break
+                if data.get("address"):
+                    update_fields["address"] = data["address"]
                 update_lead(self.db, lead_id, LeadUpdate(**update_fields))
 
             return result
