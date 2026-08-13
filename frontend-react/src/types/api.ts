@@ -90,6 +90,91 @@ export interface LeadCreate {
   owner_id: number;
 }
 
+// ---------- Lead AI insights (GET /leads/{id} only) ----------
+//
+// Backend provenance: application/services/infra_adapters.py::get_lead_ai_insights,
+// reconstructing each stage's own DTO from application/dto/models.py
+// (CompanyIntelligenceOutput / DecisionOutput / EvaluationReport /
+// ReviewOutput / MessagingOutput). Every stage is `null` until the pipeline
+// has actually run that stage for this lead (e.g. `messaging` stays null
+// when the lead was routed to human_review).
+
+export interface AIExplanation {
+  reasoning: string;
+  evidence: string[];
+  confidence: number;
+}
+
+export interface CompanyIntelligenceInsight {
+  industry_analysis: string | null;
+  website_quality: string | null;
+  technology_signals: string[];
+  market_position: string | null;
+  pain_points: string[];
+  growth_indicators: string[];
+  icp_alignment_score: number;
+  explanation: AIExplanation;
+  source: "heuristic" | "llm" | string;
+  model_used: string | null;
+  generated_at: string | null;
+}
+
+export interface DecisionInsight {
+  qualification: string;
+  recommended_action: "proceed" | "review" | "reject" | string;
+  explanation: AIExplanation;
+  source: "rule_based" | "llm" | string;
+  model_used: string | null;
+  generated_at: string | null;
+}
+
+export interface EvaluationInsight {
+  confidence: number;
+  completeness: number;
+  grounding: number;
+  consistency: number;
+  overall: number;
+  notes: string[];
+  model_used: string | null;
+  generated_at: string | null;
+}
+
+export interface ReviewInsight {
+  decision: "auto_approved" | "flagged" | "human_review" | string;
+  reason: string;
+  threshold_used: number | null;
+  model_used: string | null;
+  generated_at: string | null;
+}
+
+export interface MessagingInsight {
+  email_subject: string | null;
+  email_body: string | null;
+  linkedin_opener: string | null;
+  follow_up_strategy: string | null;
+  channel_notes: string | null;
+  explanation: AIExplanation;
+  source: "template" | "llm" | string;
+  model_used: string | null;
+  generated_at: string | null;
+}
+
+export interface LeadAIInsights {
+  company_intelligence: CompanyIntelligenceInsight | null;
+  decision: DecisionInsight | null;
+  evaluation: EvaluationInsight | null;
+  review: ReviewInsight | null;
+  messaging: MessagingInsight | null;
+}
+
+/** Response shape of GET /leads/{id} specifically — every `Lead` field plus
+ * the AI insights bundle that only that endpoint returns (list/create/update
+ * responses are the plain `Lead` shape and do not include it). */
+export interface LeadDetail extends Lead {
+  ai_insights: LeadAIInsights;
+}
+
+
 export interface LeadUpdate {
   company_name?: string | null;
   industry?: string | null;

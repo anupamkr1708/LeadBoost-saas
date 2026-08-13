@@ -34,6 +34,14 @@ export const STATUS_STYLES: Record<string, { label: string; className: string; d
   SKIPPED: { label: "Skipped", className: "bg-white/10 text-muted-foreground border-white/10", dot: "bg-white/40" },
   QUEUED: { label: "Queued", className: "bg-indigo-500/15 text-indigo-300 border-indigo-500/30", dot: "bg-indigo-400" },
   RUNNING: { label: "Running", className: "bg-primary-500/15 text-primary-300 border-primary-500/30", dot: "bg-primary-400" },
+  // Decision agent's recommended_action (application/dto/models.py::DecisionOutput)
+  PROCEED: { label: "Proceed", className: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30", dot: "bg-emerald-400" },
+  REVIEW: { label: "Review", className: "bg-amber-500/15 text-amber-300 border-amber-500/30", dot: "bg-amber-400" },
+  REJECT: { label: "Reject", className: "bg-rose-500/15 text-rose-300 border-rose-500/30", dot: "bg-rose-400" },
+  // Review agent's routing decision (application/dto/models.py::ReviewOutput)
+  AUTO_APPROVED: { label: "Auto-approved", className: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30", dot: "bg-emerald-400" },
+  FLAGGED: { label: "Flagged", className: "bg-amber-500/15 text-amber-300 border-amber-500/30", dot: "bg-amber-400" },
+  HUMAN_REVIEW: { label: "Human review", className: "bg-indigo-500/15 text-indigo-300 border-indigo-500/30", dot: "bg-indigo-400" },
 };
 
 export const TIME_RANGE_OPTIONS = [

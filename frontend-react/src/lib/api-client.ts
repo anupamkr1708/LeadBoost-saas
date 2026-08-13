@@ -99,6 +99,17 @@ export function normalizeApiError(error: unknown): ApiErrorShape {
       return { status, message: (data as { detail: string }).detail };
     }
 
+    // The 402 payments-not-live response (POST /upgrade) is a plain
+    // JSONResponse, not an HTTPException -- its body is
+    // {"message": ..., "activated": false, "requested_plan": ...}, with
+    // no `detail` key at all. Without this, the two generic fallbacks
+    // below would show a raw Axios string like "Request failed with
+    // status code 402" instead of the backend's actual, honest
+    // "Online payments coming soon." explanation.
+    if (status === 402 && typeof (data as { message?: string })?.message === "string") {
+      return { status, message: (data as { message: string }).message };
+    }
+
     if (status === 401) return { status, message: "Your session has expired. Please sign in again." };
     if (status === 403) return { status, message: "You don't have permission to do that." };
     if (status === 404) return { status, message: "We couldn't find that." };

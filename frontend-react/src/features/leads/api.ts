@@ -1,5 +1,5 @@
 import { apiClient } from "@/lib/api-client";
-import type { Lead, LeadCreate, LeadProcessRequest, LeadUpdate } from "@/types/api";
+import type { Lead, LeadCreate, LeadDetail, LeadProcessRequest, LeadUpdate } from "@/types/api";
 
 /**
  * Leads endpoints — maps 1:1 to the `leads` tag in the OpenAPI spec.
@@ -15,7 +15,11 @@ export const leadsApi = {
 
   createSingle: (payload: LeadCreate) => apiClient.post<Lead>("/api/v2/leads/single", payload).then((r) => r.data),
 
-  get: (leadId: number) => apiClient.get<Lead>(`/api/v2/leads/${leadId}`).then((r) => r.data),
+  // GET /leads/{id} is the one endpoint that returns the richer LeadDetail
+  // shape (adds `ai_insights`: Company Intelligence, Decision, Evaluation,
+  // Review, and Messaging output) — every other lead endpoint returns the
+  // plain `Lead` shape.
+  get: (leadId: number) => apiClient.get<LeadDetail>(`/api/v2/leads/${leadId}`).then((r) => r.data),
 
   update: (leadId: number, payload: LeadUpdate) =>
     apiClient.put<Lead>(`/api/v2/leads/${leadId}`, payload).then((r) => r.data),
