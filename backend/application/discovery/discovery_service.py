@@ -90,8 +90,10 @@ from application.utils.stage_logger import stage_span
 from application.workflows.lead_pipeline import run_lead_pipeline
 from core.domain.schemas.lead import LeadCreate, LeadUpdate
 from core.infrastructure.billing.subscription_service import SubscriptionService
+from core.infrastructure.billing.quota_guard import reserve_daily_lead_quota
 from core.infrastructure.database.crud import create_lead, get_lead_by_url, update_lead
 from core.infrastructure.logging import get_logger
+from sqlalchemy.exc import IntegrityError
 
 logger = get_logger("application.discovery.service")
 
@@ -470,7 +472,6 @@ class DiscoveryService:
     ) -> List[LeadCreationOutcome]:
         subscription_service = SubscriptionService(self.db)
         usage = subscription_service.get_organization_usage(organization_id)
-        remaining_quota = usage.remaining_daily_leads
 
         to_process: List[tuple] = []
         outcomes: List[LeadCreationOutcome] = []
@@ -493,7 +494,20 @@ class DiscoveryService:
                     )
                     continue
 
-                if remaining_quota <= 0:
+                # Production-robustness hardening (Phase A5): quota
+                # enforcement for this loop used to be a plain local
+                # counter (`remaining_quota`) seeded once from a single
+                # COUNT(*)-based snapshot (`usage`) -- correct only
+                # against *other businesses in this same request*, not
+                # against a concurrent /discovery/search or /leads
+                # request for the same organization creating leads at
+                # the same time. It's replaced here with an atomic,
+                # per-lead reservation (core/infrastructure/billing/
+                # quota_guard.py) that is safe across concurrent
+                # requests: each call re-checks against the database's
+                # current committed count, not a value cached at the
+                # start of this loop.
+                if not reserve_daily_lead_quota(self.db, organization_id, usage.max_leads_per_day):
                     outcomes.append(
                         LeadCreationOutcome(
                             name=name,
@@ -509,7 +523,6 @@ class DiscoveryService:
                         self.db,
                         LeadCreate(website=website, organization_id=organization_id, owner_id=owner_id),
                     )
-                    remaining_quota -= 1
 
                     # Pre-seed fields Discovery already knows from Overpass,
                     # reusing existing Lead columns -- no schema change.
@@ -522,6 +535,25 @@ class DiscoveryService:
                         update_lead(self.db, db_lead.id, LeadUpdate(**seed_fields))
 
                     to_process.append((business, db_lead))
+                except IntegrityError:
+                    # Production-robustness hardening (Phase A3,
+                    # lead-creation race): a concurrent request created a
+                    # lead for this same website between the dedup check
+                    # above and this call (see the UniqueConstraint on
+                    # core/domain/models/lead.py::Lead) -- report it the
+                    # same way the ordinary dedup path above does, not as
+                    # a failure.
+                    self.db.rollback()
+                    existing = get_lead_by_url(self.db, website, organization_id)
+                    outcomes.append(
+                        LeadCreationOutcome(
+                            name=name,
+                            website=website,
+                            status="duplicate",
+                            lead_id=existing.id if existing else None,
+                            reason="A lead for this website already exists in your organization",
+                        )
+                    )
                 except Exception as e:
                     logger.error(f"Failed to create lead for '{name}': {e}")
                     outcomes.append(

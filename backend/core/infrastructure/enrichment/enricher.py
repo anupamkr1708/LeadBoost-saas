@@ -453,7 +453,16 @@ class WaterfallEnricher:
             )
 
             chain = prompt | llm
-            response = chain.invoke({"context": context})
+            # Production-robustness hardening (Phase B4): see
+            # application/services/llm_provider.py's docstring -- this
+            # module independently constructs its own ChatGroq client and
+            # must share the same process-wide concurrency gate as the
+            # other two Groq call sites (they all draw on the same
+            # account/TPM budget).
+            from application.services.llm_provider import llm_call_slot
+
+            with llm_call_slot():
+                response = chain.invoke({"context": context})
             content = response.content if hasattr(response, "content") else str(response)
 
             json_match = re.search(r"\{.*\}", content, re.DOTALL)

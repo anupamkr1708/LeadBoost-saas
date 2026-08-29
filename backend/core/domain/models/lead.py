@@ -11,6 +11,7 @@ from sqlalchemy import (
     Boolean,
     Float,
     ForeignKey,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -77,6 +78,34 @@ class Lead(Base):
     owner = relationship("User", back_populates="leads")
     enrichment_logs = relationship("LeadEnrichmentLog", back_populates="lead")
     scraping_logs = relationship("ScrapingLog", back_populates="lead")
+
+    # Production-robustness hardening, Phase A5 (lead-creation race):
+    # every existing creation call site (api/endpoints/leads.py x2,
+    # application/discovery/discovery_service.py) already checks
+    # get_lead_by_url(organization_id, website) before creating -- but
+    # that check-then-insert is not itself atomic, so two concurrent
+    # identical submissions (duplicate click, client retry racing the
+    # original request) could previously both pass the check and both
+    # insert, producing two Lead rows for the same site and two
+    # redundant full pipeline runs. This constraint makes the guarantee
+    # the existing dedup check was already assuming actually hold at the
+    # database level; the losing insert raises IntegrityError, which
+    # every creation call site now catches and treats exactly like an
+    # ordinary pre-existing-lead result (see get_lead_by_url usage at
+    # each call site).
+    #
+    # NOTE on rollout: this project creates its schema via
+    # `Base.metadata.create_all()` (no Alembic migrations are wired up --
+    # see other additive tables in this codebase, e.g.
+    # PipelineExecutionRecord), which only creates *missing* tables/
+    # constraints and will not retroactively ALTER an already-existing
+    # `leads` table in a database that predates this change. A fresh
+    # database gets this constraint automatically; an already-running
+    # deployment needs a one-time manual migration (see the final report
+    # for the exact statement and the required de-duplication step).
+    __table_args__ = (
+        UniqueConstraint("organization_id", "website", name="uq_leads_org_website"),
+    )
 
 
 class LeadEnrichmentLog(Base):

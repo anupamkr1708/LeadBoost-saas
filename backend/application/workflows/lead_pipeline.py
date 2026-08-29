@@ -44,6 +44,7 @@ from typing import Any, Dict
 from langgraph.graph import END, START, StateGraph
 from sqlalchemy.orm import Session
 
+from application.concurrency import pipeline_lock
 from application.dto.models import PipelineResult, PipelineStatus
 from application.observability import repository as observability_repo
 from application.services import infra_adapters
@@ -131,6 +132,42 @@ class LeadPipeline:
                 errors=[{"error": "Lead not found"}],
             )
 
+        # Production-robustness hardening, Phase A3/A4: refuse to start a
+        # second full pipeline run for a lead that already has one in
+        # flight (concurrent request, duplicate click, or a retry that
+        # arrives before the first attempt has finished). This is a pure
+        # mutual-exclusion guard, not a caching layer -- it never
+        # suppresses a *later*, non-overlapping reprocess request, which
+        # is the actual intended behavior of "manually trigger processing
+        # for a lead" (see api/endpoints/leads.py::process_lead_now).
+        if not pipeline_lock.try_acquire(self.db, lead.id, lead.organization_id, pipeline_id):
+            active = pipeline_lock.get_active(self.db, lead.id)
+            active_pipeline_id = active.pipeline_id if active else None
+            logger.info(
+                "LeadPipeline.execute: lead %s already has a pipeline in flight (pipeline_id=%s); skipping duplicate run",
+                lead.id,
+                active_pipeline_id,
+            )
+            completed_at = datetime.now(timezone.utc)
+            return PipelineResult(
+                pipeline_id=active_pipeline_id or pipeline_id,
+                lead_id=lead.id,
+                status=PipelineStatus.SKIPPED_IN_PROGRESS,
+                started_at=started_at.isoformat(),
+                completed_at=completed_at.isoformat(),
+                duration_ms=int((time.time() - perf_start) * 1000),
+                errors=[
+                    {
+                        "stage": "pipeline",
+                        "error": (
+                            "A pipeline is already running for this lead "
+                            f"(pipeline_id={active_pipeline_id}). No duplicate "
+                            "scraping/enrichment/LLM work was started."
+                        ),
+                    }
+                ],
+            )
+
         ai_features_enabled = infra_adapters.check_ai_features_enabled(
             self.db, lead.organization_id
         )
@@ -146,17 +183,54 @@ class LeadPipeline:
         }
 
         try:
-            final_state: Dict[str, Any] = await self._graph.ainvoke(initial_state)
-        except Exception as e:
-            # Safety net only: every node already catches its own
-            # exceptions (see graph_nodes._run_stage), so this branch
-            # guards against an unexpected failure in the graph runtime
-            # itself, ensuring a pipeline execution is always recorded.
-            logger.error(
-                f"LeadPipeline graph execution failed for lead {lead_id}: {e}", exc_info=True
-            )
+            try:
+                final_state: Dict[str, Any] = await self._graph.ainvoke(initial_state)
+            except Exception as e:
+                # Safety net only: every node already catches its own
+                # exceptions (see graph_nodes._run_stage), so this branch
+                # guards against an unexpected failure in the graph runtime
+                # itself, ensuring a pipeline execution is always recorded.
+                logger.error(
+                    f"LeadPipeline graph execution failed for lead {lead_id}: {e}", exc_info=True
+                )
+                completed_at = datetime.now(timezone.utc)
+                duration_ms = int((time.time() - perf_start) * 1000)
+                self._record_execution(
+                    pipeline_id,
+                    lead.id,
+                    lead.organization_id,
+                    started_at,
+                    completed_at,
+                    duration_ms,
+                    PipelineStatus.FAILED,
+                    stage_count=0,
+                    error_count=1,
+                )
+                return PipelineResult(
+                    pipeline_id=pipeline_id,
+                    lead_id=lead.id,
+                    status=PipelineStatus.FAILED,
+                    ai_features_enabled=ai_features_enabled,
+                    started_at=started_at.isoformat(),
+                    completed_at=completed_at.isoformat(),
+                    duration_ms=duration_ms,
+                    errors=[{"stage": "pipeline", "error": str(e)}],
+                )
+
             completed_at = datetime.now(timezone.utc)
             duration_ms = int((time.time() - perf_start) * 1000)
+            errors = final_state.get("errors", [])
+
+            # SUCCESS: every stage completed with no recorded errors.
+            # PARTIAL_SUCCESS: the pipeline reached the end but one or more
+            # stages degraded gracefully (see graph_nodes._run_stage).
+            # FAILED is reserved for the two cases above (lead not found, or
+            # an unhandled graph-runtime exception) -- a run that *completes*
+            # is, by definition, at worst partially successful.
+            final_status = (
+                PipelineStatus.SUCCESS if not errors else PipelineStatus.PARTIAL_SUCCESS
+            )
+
             self._record_execution(
                 pipeline_id,
                 lead.id,
@@ -164,46 +238,19 @@ class LeadPipeline:
                 started_at,
                 completed_at,
                 duration_ms,
-                PipelineStatus.FAILED,
-                stage_count=0,
-                error_count=1,
-            )
-            return PipelineResult(
-                pipeline_id=pipeline_id,
-                lead_id=lead.id,
-                status=PipelineStatus.FAILED,
-                ai_features_enabled=ai_features_enabled,
-                started_at=started_at.isoformat(),
-                completed_at=completed_at.isoformat(),
-                duration_ms=duration_ms,
-                errors=[{"stage": "pipeline", "error": str(e)}],
+                final_status,
+                stage_count=len(final_state.get("stage_timings_ms", {})),
+                error_count=len(errors),
             )
 
-        completed_at = datetime.now(timezone.utc)
-        duration_ms = int((time.time() - perf_start) * 1000)
-        errors = final_state.get("errors", [])
-
-        # SUCCESS: every stage completed with no recorded errors.
-        # PARTIAL_SUCCESS: the pipeline reached the end but one or more
-        # stages degraded gracefully (see graph_nodes._run_stage).
-        # FAILED is reserved for the two cases above (lead not found, or
-        # an unhandled graph-runtime exception) -- a run that *completes*
-        # is, by definition, at worst partially successful.
-        final_status = PipelineStatus.SUCCESS if not errors else PipelineStatus.PARTIAL_SUCCESS
-
-        self._record_execution(
-            pipeline_id,
-            lead.id,
-            lead.organization_id,
-            started_at,
-            completed_at,
-            duration_ms,
-            final_status,
-            stage_count=len(final_state.get("stage_timings_ms", {})),
-            error_count=len(errors),
-        )
-
-        return self._to_result(final_state, pipeline_id, started_at, completed_at, duration_ms, final_status)
+            return self._to_result(
+                final_state, pipeline_id, started_at, completed_at, duration_ms, final_status
+            )
+        finally:
+            # Production-robustness hardening, Phase A3/A4: always release
+            # the lock, whatever the outcome, so a later (non-overlapping)
+            # reprocess request is never blocked by this run.
+            pipeline_lock.release(self.db, lead.id)
 
     def _record_execution(
         self,
