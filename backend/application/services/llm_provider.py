@@ -9,11 +9,30 @@ so it exists in exactly one place, following the same conventions (same
 env vars, same graceful-degradation-on-missing-key behaviour) as the
 existing infrastructure -- it does not introduce a new LLM integration
 pattern, it reuses the existing one.
+
+Production-robustness hardening (Phase B4, LLM concurrency): all three of
+the call sites above share one Groq API key/account and therefore one
+TPM (tokens-per-minute) budget, but until this change none of them
+coordinated with each other or bounded how many calls could be in flight
+at once -- multiple pipeline stages (company intelligence, decision,
+messaging) and multiple concurrently-processing leads could all reach
+Groq at the same moment, which is exactly the failure mode real testing
+against this codebase already hit (Groq TPM limits). `llm_call_slot()`
+below is one process-wide `threading.Semaphore` (safe to acquire/release
+from the worker threads every one of these three call sites actually
+runs on, since each is reached via `asyncio.to_thread` -- see
+application/workflows/graph_nodes.py) that all three now acquire around
+their actual `.invoke()` call, bounding total concurrent Groq calls to
+`LLM_MAX_CONCURRENT_CALLS` regardless of which code path triggers them.
+This does not touch retry/backoff, JSON parsing, or fallback behavior in
+any of the three call sites -- it only wraps the network call itself.
 """
 
 import json
 import os
 import re
+import threading
+from contextlib import contextmanager
 from typing import Any, Dict, List, Optional, Tuple
 
 from tenacity import Retrying, retry_if_exception_type, stop_after_attempt, wait_random_exponential
@@ -21,6 +40,24 @@ from tenacity import Retrying, retry_if_exception_type, stop_after_attempt, wait
 from core.infrastructure.logging import get_logger
 
 logger = get_logger("application.llm_provider")
+
+_LLM_MAX_CONCURRENT_CALLS = max(1, int(os.getenv("LLM_MAX_CONCURRENT_CALLS", "4")))
+_llm_call_semaphore = threading.Semaphore(_LLM_MAX_CONCURRENT_CALLS)
+
+
+@contextmanager
+def llm_call_slot():
+    """Blocks until fewer than `LLM_MAX_CONCURRENT_CALLS` Groq calls are
+    in flight process-wide, then yields. Use as a `with` block around the
+    actual `.invoke()`/`.invoke({})` call -- see this module's docstring
+    for why this exists and where else it's used
+    (core/infrastructure/enrichment/enricher.py,
+    core/infrastructure/messaging/messenger.py)."""
+    _llm_call_semaphore.acquire()
+    try:
+        yield
+    finally:
+        _llm_call_semaphore.release()
 
 
 def is_llm_available() -> bool:
@@ -76,7 +113,8 @@ def _invoke_chain_with_retry(chain, inputs: Dict[str, Any]) -> Tuple[Any, int]:
         wait=wait_random_exponential(multiplier=1.0, max=4.0),
         retry=retry_if_exception_type(Exception),
     )
-    response = retryer(chain.invoke, inputs)
+    with llm_call_slot():
+        response = retryer(chain.invoke, inputs)
     attempts = retryer.statistics.get("attempt_number", 1)
     return response, max(0, attempts - 1)
 

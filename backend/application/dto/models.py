@@ -20,6 +20,13 @@ class PipelineStatus(str, Enum):
     SUCCESS = "SUCCESS"
     PARTIAL_SUCCESS = "PARTIAL_SUCCESS"
     FAILED = "FAILED"
+    # Production-robustness hardening, Phase A3/A4: returned instead of
+    # running the graph when another execution for the same lead is
+    # already in flight (see application.concurrency.pipeline_lock).
+    # Never written to PipelineExecutionRecord -- no stages actually ran,
+    # so it would not be a real "execution" for pipeline-metrics purposes
+    # (see application.workflows.lead_pipeline.LeadPipeline.execute).
+    SKIPPED_IN_PROGRESS = "SKIPPED_IN_PROGRESS"
 
 
 class Explanation(BaseModel):

@@ -32,7 +32,8 @@ from core.domain.models.user import User
 from core.domain.models.api_key import APIKey
 from core.domain.models.lead import Lead, LeadEnrichmentLog, ScrapingLog, AIDecisionLog
 from core.domain.models.subscription import Plan
-from core.domain.models.billing import Subscription, UsageRecord, Invoice
+from core.domain.models.billing import Subscription, UsageRecord, Invoice, DailyLeadQuotaUsage
+from core.domain.models.pipeline_lock import ActivePipelineLock
 
 __all__ = [
     "Organization",
@@ -46,4 +47,6 @@ __all__ = [
     "Subscription",
     "UsageRecord",
     "Invoice",
+    "DailyLeadQuotaUsage",
+    "ActivePipelineLock",
 ]

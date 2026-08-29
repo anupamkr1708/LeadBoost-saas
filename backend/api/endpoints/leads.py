@@ -31,6 +31,8 @@ from core.infrastructure.logging import get_logger, log_scraping_attempt
 from application.workflows.lead_pipeline import run_lead_pipeline
 from application.services.infra_adapters import get_lead_ai_insights
 from core.infrastructure.billing.subscription_service import SubscriptionService
+from core.infrastructure.billing.quota_guard import reserve_daily_lead_quota
+from sqlalchemy.exc import IntegrityError
 
 logger = get_logger(__name__)
 
@@ -112,7 +114,9 @@ async def create_leads_from_urls(
             )
             return existing_leads
         
-        # Check quota atomically
+        # Check quota (fast-path rejection with a friendly, accurate
+        # message for the common case -- this alone is not sufficient
+        # under concurrency, see the atomic per-lead reservation below).
         usage = subscription_service.get_organization_usage(current_user.organization_id)
         
         if len(new_urls) > usage.remaining_daily_leads:
@@ -121,19 +125,59 @@ async def create_leads_from_urls(
                 detail=f"Daily lead limit exceeded. Remaining: {usage.remaining_daily_leads}, Requested: {len(new_urls)}"
             )
         
-        # Create all new leads in single transaction
+        # Create all new leads.
+        #
+        # Production-robustness hardening (Phase A5): the check above is
+        # a single COUNT(*)-based snapshot and is NOT atomic against a
+        # concurrent request for the same organization (see
+        # core/infrastructure/billing/quota_guard.py) -- so each lead is
+        # additionally gated here by an atomic reservation immediately
+        # before it is created. If a concurrent request has consumed the
+        # remaining quota since the check above, reservation fails and
+        # this stops creating further leads for *this* request rather
+        # than exceeding the daily limit; leads already created earlier
+        # in this same loop are kept (each `create_lead()` call commits
+        # individually, matching this codebase's existing per-row commit
+        # convention -- see core/infrastructure/database/crud.py), so the
+        # response is a partial-success list rather than an error.
+        #
+        # Production-robustness hardening (Phase A3, lead-creation race):
+        # `create_lead()` can now raise IntegrityError if a concurrent
+        # request created a lead for the same URL between the dedup
+        # check above and this call (see the UniqueConstraint on
+        # core/domain/models/lead.py::Lead) -- treated exactly like the
+        # existing "lead already exists" path.
         created_leads = []
+        quota_exhausted_mid_batch = False
         for url in new_urls:
+            if not reserve_daily_lead_quota(db, current_user.organization_id, usage.max_leads_per_day):
+                quota_exhausted_mid_batch = True
+                logger.warning(
+                    "Daily lead quota exhausted mid-batch by a concurrent request",
+                    extra={
+                        "organization_id": current_user.organization_id,
+                        "user_id": current_user.id,
+                        "created_so_far": len(created_leads),
+                        "remaining_urls_skipped": len(new_urls) - len(created_leads),
+                    }
+                )
+                break
+
             lead_create = LeadCreate(
                 website=url,
                 organization_id=current_user.organization_id,
                 owner_id=current_user.id,
             )
-            db_lead = create_lead(db, lead_create)
+            try:
+                db_lead = create_lead(db, lead_create)
+            except IntegrityError:
+                db.rollback()
+                existing = get_lead_by_url(db, url, current_user.organization_id)
+                if existing:
+                    existing_leads.append(existing)
+                    continue
+                raise
             created_leads.append(db_lead)
-        
-        # Commit all leads atomically
-        db.commit()
         
         # Refresh all leads to get updated data
         for lead in created_leads:
@@ -154,6 +198,7 @@ async def create_leads_from_urls(
                 "new_leads_count": len(created_leads),
                 "existing_leads_count": len(existing_leads),
                 "lead_ids": [lead.id for lead in created_leads],
+                "quota_exhausted_mid_batch": quota_exhausted_mid_batch,
             }
         )
         
@@ -221,7 +266,9 @@ async def create_lead_endpoint(
             )
             return existing
 
-        # Check subscription limits
+        # Check subscription limits (fast-path rejection; see the atomic
+        # reservation immediately below for the actual concurrency-safe
+        # enforcement -- Phase A5).
         subscription_service = SubscriptionService(db)
         if not subscription_service.can_create_lead(current_user.organization_id):
             usage = subscription_service.get_organization_usage(current_user.organization_id)
@@ -230,10 +277,29 @@ async def create_lead_endpoint(
                 detail=f"Daily lead limit exceeded. Remaining: {usage.remaining_daily_leads}"
             )
 
+        usage = subscription_service.get_organization_usage(current_user.organization_id)
+        if not reserve_daily_lead_quota(db, current_user.organization_id, usage.max_leads_per_day):
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Daily lead limit exceeded. Remaining: 0",
+            )
+
         # Create the lead record
+        #
+        # Production-robustness hardening (Phase A3, lead-creation race):
+        # a concurrent request may have created a lead for this same URL
+        # between the dedup check above and this call (see the
+        # UniqueConstraint on core/domain/models/lead.py::Lead) --
+        # treated exactly like the existing "lead already exists" path.
         lead.website = normalized_url
-        db_lead = create_lead(db, lead)
-        db.commit()
+        try:
+            db_lead = create_lead(db, lead)
+        except IntegrityError:
+            db.rollback()
+            existing = get_lead_by_url(db, normalized_url, current_user.organization_id)
+            if existing:
+                return existing
+            raise
         db.refresh(db_lead)
 
         # Process the lead in background via the LangGraph LeadPipeline

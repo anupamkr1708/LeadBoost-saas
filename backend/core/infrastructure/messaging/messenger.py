@@ -142,17 +142,26 @@ class Messenger:
             # straight to the chat model as a plain message list, which
             # ChatGroq (and every LangChain chat model) accepts directly
             # without treating the content as a template.
-            response = ChatGroq(
-                api_key=api_key,
-                model=self.model_name,
-                temperature=0.3,  # Low temperature to reduce hallucinations
-                max_tokens=200,
-            ).invoke(
-                [
-                    ("system", system_prompt),
-                    ("human", human_prompt),
-                ]
-            )
+            # Production-robustness hardening (Phase B4): see
+            # application/services/llm_provider.py's docstring -- this
+            # module independently constructs its own ChatGroq client and
+            # must share the same process-wide concurrency gate as the
+            # other two Groq call sites (they all draw on the same
+            # account/TPM budget).
+            from application.services.llm_provider import llm_call_slot
+
+            with llm_call_slot():
+                response = ChatGroq(
+                    api_key=api_key,
+                    model=self.model_name,
+                    temperature=0.3,  # Low temperature to reduce hallucinations
+                    max_tokens=200,
+                ).invoke(
+                    [
+                        ("system", system_prompt),
+                        ("human", human_prompt),
+                    ]
+                )
 
             content = (
                 response.content if hasattr(response, "content") else str(response)
