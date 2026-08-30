@@ -450,7 +450,8 @@ class DiscoveryService:
             discovered = list(await asyncio.gather(*[resolve_one(c) for c in candidates]))
 
         resolved_via_fallback_count = sum(
-            1 for b in discovered if b.resolution.resolved_via == "brave"
+            1 for b in discovered
+            if b.resolution.resolved_via == self.resolver_fallback.name
         )
         return discovered, resolved_via_fallback_count
 
