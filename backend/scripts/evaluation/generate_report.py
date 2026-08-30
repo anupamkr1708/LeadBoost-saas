@@ -331,10 +331,21 @@ def write_pipeline_summary_md(
     lines.append("## Normalizer Metrics")
     lines.append("")
     lines.append(f"- Sites normalized: {normalizer.get('sites_normalized', 0)}")
-    lines.append(f"- Organization type coverage: {_fmt_pct(normalizer.get('organization_type_coverage', 0.0))}")
-    lines.append(f"- Address coverage: {_fmt_pct(normalizer.get('address_coverage', 0.0))}")
-    lines.append(f"- Social coverage: {_fmt_pct(normalizer.get('social_coverage', 0.0))}")
-    lines.append(f"- Technology coverage: {_fmt_pct(normalizer.get('technology_coverage', 0.0))}")
+    # Metrics-audit fix (these previously rendered as 10000.0% instead of
+    # 100.0%): organization_type_coverage/address_coverage/
+    # social_coverage/technology_coverage are computed by
+    # scripts/evaluation/metrics.py::_pct(), which already returns a
+    # 0-100 scaled percentage -- unlike every other value on this page,
+    # which comes from _rate() (a 0-1 fraction) and is correctly scaled
+    # by _fmt_pct()'s own "* 100". Passing an already-0-100 value through
+    # _fmt_pct() re-multiplied it by 100 a second time. These four are
+    # formatted directly instead; the underlying metric values in
+    # combined_metrics/pipeline_metrics.json are untouched and were
+    # already correct -- only this display was wrong.
+    lines.append(f"- Organization type coverage: {normalizer.get('organization_type_coverage', 0.0):.1f}%")
+    lines.append(f"- Address coverage: {normalizer.get('address_coverage', 0.0):.1f}%")
+    lines.append(f"- Social coverage: {normalizer.get('social_coverage', 0.0):.1f}%")
+    lines.append(f"- Technology coverage: {normalizer.get('technology_coverage', 0.0):.1f}%")
     lines.append("")
     lines.append("Field completeness: " + json.dumps(normalizer.get("field_completeness_pct", {})))
     lines.append("")

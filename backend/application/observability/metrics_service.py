@@ -112,8 +112,10 @@ class AnalyticsService:
             round((total_leads / total_businesses) * 100, 2) if total_businesses else 0.0
         )
         # Website Resolution Rate = of the businesses the search provider
-        # returned with *no* website, what fraction did the Brave fallback
-        # successfully resolve and validate.
+        # returned with *no* website, what fraction did the configured
+        # fallback provider (Serper by default; see
+        # DiscoveryService.resolver_fallback) successfully resolve and
+        # validate.
         website_resolution_rate = (
             round((total_resolved_via_fallback / total_missing_website) * 100, 2)
             if total_missing_website

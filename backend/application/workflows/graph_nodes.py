@@ -475,6 +475,32 @@ class LeadPipelineNodes:
             score_result = state.get("score_result") or {}
             context = state.get("context") or {}
             company_intel = state.get("company_intelligence") or {}
+            scraping_result = state.get("scraping_result") or {}
+            enrichment_result = state.get("enrichment_result") or {}
+
+            # Metrics-audit fix (average_grounding was ~0.02 in production
+            # despite genuinely-grounded evidence): source_text previously
+            # covered only about_text/scraped_data/industry_analysis, but
+            # the Decision Agent's own prompt
+            # (application/prompts/templates/decision_v1.yaml) explicitly
+            # instructs it to draw "evidence" from pain_points,
+            # growth_indicators, the deterministic score,
+            # qualification_label, and icp_alignment_score too (see
+            # DecisionAgent._decide_with_llm's `inputs` dict) -- and its
+            # deterministic fallback (_decide_deterministically) produces
+            # evidence strings made *entirely* of the score/confidence
+            # values below, never of scraped prose at all. None of that
+            # was in source_text, so genuinely-grounded evidence citing
+            # those fields was scored as ungrounded purely because the
+            # reference text didn't contain what was being checked
+            # against -- this expands source_text to cover every field
+            # evidence can legitimately be drawn from in either path, not
+            # a change to evaluate_grounding's formula itself.
+            score = score_result.get("total_score")
+            qualification_label = score_result.get("qualification_label")
+            icp_alignment_score = company_intel.get("icp_alignment_score")
+            scrape_confidence = scraping_result.get("confidence")
+            enrichment_confidence = enrichment_result.get("confidence")
 
             source_text = " ".join(
                 filter(
@@ -483,6 +509,23 @@ class LeadPipelineNodes:
                         context.get("about_text"),
                         (context.get("scraped_data") or {}).get("text_content"),
                         str(company_intel.get("industry_analysis") or ""),
+                        ", ".join(company_intel.get("pain_points") or []),
+                        ", ".join(company_intel.get("growth_indicators") or []),
+                        f"Deterministic score: {round(score, 1)}/100"
+                        if score is not None
+                        else None,
+                        f"Qualification label: {qualification_label}"
+                        if qualification_label
+                        else None,
+                        f"ICP alignment score: {icp_alignment_score}"
+                        if icp_alignment_score is not None
+                        else None,
+                        f"Scrape confidence: {round(scrape_confidence, 2)}"
+                        if scrape_confidence is not None
+                        else None,
+                        f"Enrichment confidence: {round(enrichment_confidence, 2)}"
+                        if enrichment_confidence is not None
+                        else None,
                     ],
                 )
             )
