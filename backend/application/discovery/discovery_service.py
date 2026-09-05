@@ -88,6 +88,8 @@ from application.discovery.website_validator import WebsiteValidator
 from application.observability.repository import create_discovery_run_record
 from application.utils.stage_logger import stage_span
 from application.workflows.lead_pipeline import run_lead_pipeline
+from application.execution import job_executor
+from application.execution.job_types import JobType
 from core.domain.schemas.lead import LeadCreate, LeadUpdate
 from core.infrastructure.billing.subscription_service import SubscriptionService
 from core.infrastructure.billing.quota_guard import reserve_daily_lead_quota
@@ -580,7 +582,31 @@ class DiscoveryService:
         async def run_one(business: DiscoveredBusiness, lead) -> LeadCreationOutcome:
             async with semaphore:
                 try:
-                    result = await run_lead_pipeline(lead.id)
+                    # P0-A (durable job execution): this per-business
+                    # pipeline call previously awaited run_lead_pipeline
+                    # directly, synchronously, inside this HTTP request
+                    # (discovery's own runtime evidence shows avg
+                    # ~75s/request) -- a crash mid-request lost whatever
+                    # hadn't finished with zero record it needed
+                    # retrying. create_and_run_inline preserves the exact
+                    # same synchronous behavior/response shape (this
+                    # function still awaits the full result before
+                    # returning) while additionally recording a durable
+                    # Job row per business, so a crash here is
+                    # recoverable by the background worker loop instead
+                    # of silently losing the business's processing.
+                    result = await job_executor.create_and_run_inline(
+                        organization_id=lead.organization_id,
+                        lead_id=lead.id,
+                        job_type=JobType.DISCOVERY,
+                        # Forwards this module's OWN `run_lead_pipeline`
+                        # name (not job_executor's internal default) so
+                        # existing tests that monkeypatch
+                        # discovery_service.run_lead_pipeline continue to
+                        # work -- see job_executor.execute_job's
+                        # docstring for why this parameter exists.
+                        pipeline_runner=run_lead_pipeline,
+                    )
                     return LeadCreationOutcome(
                         name=business.candidate.name,
                         website=business.resolution.website,

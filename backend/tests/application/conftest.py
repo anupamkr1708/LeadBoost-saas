@@ -19,6 +19,12 @@ os.environ.setdefault("GROQ_API_KEY", "")  # force deterministic/heuristic agent
 os.environ.setdefault("CAN_USE_AI_FREE", "true")
 os.environ.setdefault("CAN_USE_AI_PRO", "true")
 os.environ.setdefault("CAN_USE_AI_ENTERPRISE", "true")
+# P0-A (durable job execution): the background poll loop is disabled by
+# default for the whole test suite -- tests exercise job claim/lease/
+# execute/reclaim logic directly and deterministically (see
+# tests/application/test_durable_jobs.py) rather than racing a live
+# timer-driven loop against test assertions on a shared test database.
+os.environ.setdefault("JOB_WORKER_ENABLED", "false")
 # Neutral by default so no test's outcome silently depends on whatever
 # ENABLE_AI_FOR_ALL_PLANS happens to be in the developer's local .env
 # (core.infrastructure.database.__init__ calls load_dotenv() the first

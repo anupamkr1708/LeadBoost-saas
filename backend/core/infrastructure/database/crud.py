@@ -302,6 +302,9 @@ def create_lead_enrichment_log(
     enrichment_data: str,
     confidence_score: float,
     processing_time_ms: Optional[int] = None,
+    pipeline_id: Optional[str] = None,
+    organization_id: Optional[int] = None,
+    success: bool = True,
 ) -> LeadEnrichmentLog:
     """Create a new lead enrichment log entry"""
     db_log = LeadEnrichmentLog(
@@ -310,6 +313,9 @@ def create_lead_enrichment_log(
         enrichment_data=enrichment_data,
         confidence_score=confidence_score,
         processing_time_ms=processing_time_ms,
+        pipeline_id=pipeline_id,
+        organization_id=organization_id,
+        success=success,
     )
     db.add(db_log)
     db.commit()
@@ -339,6 +345,9 @@ def create_ai_decision_log(
     processing_time_ms: Optional[int] = None,
     success: bool = True,
     error_message: Optional[str] = None,
+    pipeline_id: Optional[str] = None,
+    source: Optional[str] = None,
+    evaluation_version: Optional[str] = None,
 ) -> AIDecisionLog:
     """Create a new AI decision log entry (one row per agent stage per lead)."""
     db_log = AIDecisionLog(
@@ -355,6 +364,9 @@ def create_ai_decision_log(
         consistency_score=consistency_score,
         review_status=review_status,
         model_used=model_used,
+        pipeline_id=pipeline_id,
+        source=source,
+        evaluation_version=evaluation_version,
         prompt_name=prompt_name,
         prompt_version=prompt_version,
         processing_time_ms=processing_time_ms,
@@ -399,6 +411,8 @@ def create_scraping_log(
     error_message: Optional[str] = None,
     processing_time_ms: Optional[int] = None,
     scraped_data: Optional[str] = None,
+    pipeline_id: Optional[str] = None,
+    organization_id: Optional[int] = None,
 ) -> ScrapingLog:
     """Create a new scraping log entry"""
     db_log = ScrapingLog(
@@ -409,6 +423,8 @@ def create_scraping_log(
         confidence_score=confidence_score,
         processing_time_ms=processing_time_ms,
         scraped_data=scraped_data,
+        pipeline_id=pipeline_id,
+        organization_id=organization_id,
     )
     db.add(db_log)
     db.commit()

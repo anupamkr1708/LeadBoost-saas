@@ -32,6 +32,8 @@ from application.workflows.lead_pipeline import run_lead_pipeline
 from application.services.infra_adapters import get_lead_ai_insights
 from core.infrastructure.billing.subscription_service import SubscriptionService
 from core.infrastructure.billing.quota_guard import reserve_daily_lead_quota
+from application.execution import job_executor, job_repository
+from application.execution.job_types import JobType
 from sqlalchemy.exc import IntegrityError
 
 logger = get_logger(__name__)
@@ -63,7 +65,7 @@ async def create_leads_from_urls(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No URLs provided"
         )
-    
+
     if len(urls) > 100:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -72,7 +74,7 @@ async def create_leads_from_urls(
 
     # Deduplicate and normalize URLs
     unique_urls = list(set(url.strip().lower() for url in urls if url.strip()))
-    
+
     if not unique_urls:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -80,13 +82,13 @@ async def create_leads_from_urls(
         )
 
     subscription_service = SubscriptionService(db)
-    
+
     try:
         # Start transaction for atomic quota check + lead creation
         # Filter out already existing leads
         new_urls = []
         existing_leads = []
-        
+
         for url in unique_urls:
             existing = get_lead_by_url(db, url, current_user.organization_id)
             if existing:
@@ -101,7 +103,7 @@ async def create_leads_from_urls(
                 )
             else:
                 new_urls.append(url)
-        
+
         # Check if we need to create any new leads
         if not new_urls:
             logger.info(
@@ -113,18 +115,18 @@ async def create_leads_from_urls(
                 }
             )
             return existing_leads
-        
+
         # Check quota (fast-path rejection with a friendly, accurate
         # message for the common case -- this alone is not sufficient
         # under concurrency, see the atomic per-lead reservation below).
         usage = subscription_service.get_organization_usage(current_user.organization_id)
-        
+
         if len(new_urls) > usage.remaining_daily_leads:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail=f"Daily lead limit exceeded. Remaining: {usage.remaining_daily_leads}, Requested: {len(new_urls)}"
             )
-        
+
         # Create all new leads.
         #
         # Production-robustness hardening (Phase A5): the check above is
@@ -178,18 +180,29 @@ async def create_leads_from_urls(
                     continue
                 raise
             created_leads.append(db_lead)
-        
+
         # Refresh all leads to get updated data
         for lead in created_leads:
             db.refresh(lead)
-        
-        # Schedule processing after successful commit
+
+        # Schedule processing durably.
+        #
+        # P0-A (durable job execution): this previously used
+        # `background_tasks.add_task(run_lead_pipeline, lead.id)` --
+        # purely in-memory, silently lost on a process crash between the
+        # HTTP response and the background task actually running (see
+        # the Phase 0 audit in the P0 final report). A Job row is
+        # created here instead, durable in PostgreSQL; the background
+        # worker loop (application/execution/worker_loop.py, started
+        # from main.py's lifespan) picks it up and calls the exact same
+        # run_lead_pipeline. The HTTP response shape below is completely
+        # unchanged -- this is purely an internal dispatch-mechanism
+        # swap, not a new API contract.
         for lead in created_leads:
-            # Runs the LangGraph-based Application-layer pipeline
-            # (application/workflows/lead_pipeline.py) as a FastAPI
-            # background task, opening its own DB session.
-            background_tasks.add_task(run_lead_pipeline, lead.id)
-        
+            job_repository.create_job(
+                db, organization_id=current_user.organization_id, lead_id=lead.id, job_type=JobType.LEAD_PIPELINE
+            )
+
         logger.info(
             "Leads created successfully",
             extra={
@@ -201,7 +214,7 @@ async def create_leads_from_urls(
                 "quota_exhausted_mid_batch": quota_exhausted_mid_batch,
             }
         )
-        
+
         # Return both new and existing leads
         all_leads = created_leads + existing_leads
         return all_leads
@@ -251,7 +264,7 @@ async def create_lead_endpoint(
 
     # Normalize URL
     normalized_url = lead.website.strip().lower()
-    
+
     try:
         # Check for existing lead
         existing = get_lead_by_url(db, normalized_url, current_user.organization_id)
@@ -302,8 +315,11 @@ async def create_lead_endpoint(
             raise
         db.refresh(db_lead)
 
-        # Process the lead in background via the LangGraph LeadPipeline
-        background_tasks.add_task(run_lead_pipeline, db_lead.id)
+        # P0-A (durable job execution): see the identical note at the
+        # batch-creation call site above.
+        job_repository.create_job(
+            db, organization_id=current_user.organization_id, lead_id=db_lead.id, job_type=JobType.LEAD_PIPELINE
+        )
 
         logger.info(
             "Lead created successfully",
@@ -351,17 +367,17 @@ async def read_leads(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Skip parameter must be >= 0"
         )
-    
+
     if limit < 1 or limit > 1000:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Limit must be between 1 and 1000"
         )
-    
+
     leads = get_leads_by_organization(
         db, organization_id=current_user.organization_id, skip=skip, limit=limit
     )
-    
+
     logger.info(
         "Leads retrieved",
         extra={
@@ -372,7 +388,7 @@ async def read_leads(
             "limit": limit,
         }
     )
-    
+
     return leads
 
 
@@ -502,6 +518,20 @@ async def process_lead_now(
     # application/workflows/lead_pipeline.py); the placeholder
     # `message`/`lead_id` fields are kept for any existing caller that
     # only reads those two keys.
-    result = await run_lead_pipeline(lead_id)
+    #
+    # P0-A (durable job execution): this endpoint's synchronous
+    # behavior is intentionally preserved exactly (per that task's A7
+    # instruction) -- the response is still the full PipelineResult,
+    # computed inline, not a job_id to poll. `create_and_run_inline`
+    # additionally records a durable Job row for this attempt (see
+    # application/execution/job_executor.py), so if the process crashes
+    # mid-execution, the attempt is not silently lost -- the background
+    # worker loop's lease-expiry reclaim will find it and it becomes
+    # retryable, giving this endpoint the same crash-recovery safety net
+    # as the fire-and-forget creation endpoints, without changing its
+    # response contract at all.
+    result = await job_executor.create_and_run_inline(
+        organization_id=current_user.organization_id, lead_id=lead_id, job_type=JobType.REPROCESS_LEAD
+    )
 
     return {"message": "Lead processing complete", "lead_id": lead_id, "result": result}

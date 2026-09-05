@@ -39,7 +39,7 @@ so a single execution's full trail can be reconstructed by pipeline_id.
 import time
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from langgraph.graph import END, START, StateGraph
 from sqlalchemy.orm import Session
@@ -205,6 +205,7 @@ class LeadPipeline:
                     PipelineStatus.FAILED,
                     stage_count=0,
                     error_count=1,
+                    error_message=str(e)[:4000],
                 )
                 return PipelineResult(
                     pipeline_id=pipeline_id,
@@ -241,6 +242,7 @@ class LeadPipeline:
                 final_status,
                 stage_count=len(final_state.get("stage_timings_ms", {})),
                 error_count=len(errors),
+                error_message="; ".join(str(e.get("error", e)) for e in errors)[:4000] if errors else None,
             )
 
             return self._to_result(
@@ -263,6 +265,7 @@ class LeadPipeline:
         final_status: PipelineStatus,
         stage_count: int,
         error_count: int,
+        error_message: Optional[str] = None,
     ) -> None:
         """Best-effort: a metrics-write failure must never affect the
         pipeline's actual result, so this only logs on failure."""
@@ -278,6 +281,7 @@ class LeadPipeline:
                 final_status=final_status.value,
                 stage_count=stage_count,
                 error_count=error_count,
+                error_message=error_message,
             )
         except Exception as e:
             logger.error(f"Failed to persist pipeline execution record: {e}")

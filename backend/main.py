@@ -41,7 +41,7 @@ async def lifespan(app: FastAPI):
     # Initialize database with retry
     max_retries = 5
     retry_delay = 2
-    
+
     for attempt in range(max_retries):
         try:
             init_db()
@@ -71,10 +71,22 @@ async def lifespan(app: FastAPI):
         db.close()
 
     logger.info("LeadBoost SaaS API started successfully")
+
+    # P0-A (durable job execution): start the in-process job worker loop.
+    # See application/execution/worker_loop.py for why this is
+    # deliberately not a separate deployment/process.
+    from application.execution import worker_loop
+
+    worker_loop.start()
+
     yield
-    
+
     # Graceful shutdown
     logger.info("Shutting down LeadBoost SaaS API")
+
+    from application.execution import worker_loop
+
+    await worker_loop.stop()
 
     # Close the Application layer's shared Playwright browser pool (see
     # core/infrastructure/scraping/scraper.py). Safe no-op if no browser
@@ -120,16 +132,16 @@ async def add_request_id_and_timing(request: Request, call_next):
     """Add request ID and measure execution time"""
     request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
     request.state.request_id = request_id
-    
+
     start_time = time.time()
-    
+
     # Process request
     response = await call_next(request)
-    
+
     # Calculate duration
     duration_seconds = time.time() - start_time
     duration_ms = int(duration_seconds * 1000)
-    
+
     # Add headers
     response.headers["X-Request-ID"] = request_id
     response.headers["X-Response-Time"] = f"{duration_ms}ms"
@@ -148,7 +160,7 @@ async def add_request_id_and_timing(request: Request, call_next):
     except Exception:
         # Metrics must never be able to break a real request.
         logger.debug("Failed to record request metrics", exc_info=True)
-    
+
     # Log request
     logger.info(
         "Request completed",
@@ -160,7 +172,7 @@ async def add_request_id_and_timing(request: Request, call_next):
             "duration_ms": duration_ms,
         }
     )
-    
+
     return response
 
 
@@ -181,7 +193,7 @@ async def add_security_headers(request: Request, call_next):
 async def global_exception_handler(request: Request, exc: Exception):
     """Handle all unhandled exceptions"""
     request_id = getattr(request.state, "request_id", "unknown")
-    
+
     logger.error(
         "Unhandled exception",
         exc_info=True,
@@ -192,7 +204,7 @@ async def global_exception_handler(request: Request, exc: Exception):
             "error_type": type(exc).__name__,
         }
     )
-    
+
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={
@@ -223,9 +235,9 @@ async def health_check(db: Session = Depends(get_db)):
         "version": "2.0.0",
         "checks": {}
     }
-    
+
     is_healthy = True
-    
+
     # Check database
     try:
         db.execute(text("SELECT 1"))
@@ -234,7 +246,7 @@ async def health_check(db: Session = Depends(get_db)):
         logger.error(f"Database health check failed: {e}")
         health_status["checks"]["database"] = f"unhealthy: {str(e)}"
         is_healthy = False
-    
+
     # Check Redis
     try:
         import redis
@@ -247,14 +259,14 @@ async def health_check(db: Session = Depends(get_db)):
         logger.error(f"Redis health check failed: {e}")
         health_status["checks"]["redis"] = f"unhealthy: {str(e)}"
         is_healthy = False
-    
+
     if not is_healthy:
         health_status["status"] = "unhealthy"
         return JSONResponse(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             content=health_status
         )
-    
+
     return health_status
 
 

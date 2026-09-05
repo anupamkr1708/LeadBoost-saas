@@ -119,6 +119,33 @@ class LeadEnrichmentLog(Base):
     processing_time_ms = Column(Integer)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
+    # P0-B2 (stage execution state hardening): additive-only. Neither
+    # this table nor ScrapingLog previously carried `pipeline_id` or
+    # `organization_id` -- a stage log could be traced back to a lead,
+    # but not to which specific pipeline RUN produced it (a lead can be
+    # reprocessed many times), and not directly to its organization for
+    # tenant-scoped querying without a join. Rather than build a new,
+    # separate "StageExecution" table duplicating what ScrapingLog/
+    # LeadEnrichmentLog/AIDecisionLog (see core/domain/models/lead.py's
+    # AIDecisionLog, which already covers company_intelligence/decision/
+    # evaluation/review/messaging) already capture per-stage, these two
+    # existing tables are extended with the same two fields
+    # AIDecisionLog already gained in the P0-D provenance pass -- the
+    # three tables together now function as this system's stage
+    # execution record, exactly matching this task's own instruction to
+    # "reuse existing tables if they are sufficient" rather than force a
+    # new relational model where one isn't needed.
+    pipeline_id = Column(String, nullable=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=True, index=True)
+    # This table is currently only ever written on a successful
+    # enrichment result (see application/workflows/graph_nodes.py's
+    # enrichment stage: `if not result: return None` skips writing a log
+    # at all on failure) -- `success` is added for schema parity with
+    # ScrapingLog/AIDecisionLog and defaults True to match that existing
+    # write-only-on-success behavior exactly; it does not change when
+    # this table is written, only what's recorded when it is.
+    success = Column(Boolean, default=True)
+
     # Relationship
     lead = relationship("Lead", back_populates="enrichment_logs")
 
@@ -137,6 +164,10 @@ class ScrapingLog(Base):
     processing_time_ms = Column(Integer)
     scraped_data = Column(Text)  # JSON string of scraped data
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # P0-B2: see the identical note on LeadEnrichmentLog above.
+    pipeline_id = Column(String, nullable=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=True, index=True)
 
     # Relationship
     lead = relationship("Lead", back_populates="scraping_logs")
@@ -200,6 +231,25 @@ class AIDecisionLog(Base):
     processing_time_ms = Column(Integer, nullable=True)
     success = Column(Boolean, default=True)
     error_message = Column(Text, nullable=True)
+
+    # P0-D (AI provenance hardening): additive-only. `pipeline_id` lets an
+    # AI decision be correlated back to the specific LeadPipeline.execute()
+    # run that produced it (a lead can be reprocessed many times over its
+    # life; without this, a decision could only be traced to the lead, not
+    # to which attempt). `source` makes explicit which of "llm" |
+    # "heuristic" | "rule_based" | "template" | "fallback" produced this
+    # row -- every agent's own output DTO already carries this
+    # (CompanyIntelligenceOutput.source, DecisionOutput.source,
+    # MessagingOutput.source) but it was never persisted here, so it was
+    # previously only recoverable by checking whether `model_used` was
+    # null (an implicit, easy-to-misread signal). `evaluation_version`
+    # records which evaluation methodology version scored this row's
+    # confidence/completeness/grounding/consistency, so a future change to
+    # the evaluator's formula doesn't silently mix incomparable scores in
+    # the same historical series.
+    pipeline_id = Column(String, nullable=True, index=True)
+    source = Column(String, nullable=True)
+    evaluation_version = Column(String, nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 

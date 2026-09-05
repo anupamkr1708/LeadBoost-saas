@@ -32,6 +32,7 @@ def create_pipeline_execution_record(
     final_status: str,
     stage_count: int = 0,
     error_count: int = 0,
+    error_message: Optional[str] = None,
 ) -> PipelineExecutionRecord:
     record = PipelineExecutionRecord(
         pipeline_id=pipeline_id,
@@ -43,6 +44,7 @@ def create_pipeline_execution_record(
         final_status=final_status,
         stage_count=stage_count,
         error_count=error_count,
+        error_message=error_message,
     )
     db.add(record)
     db.commit()
@@ -62,6 +64,7 @@ def create_evaluation_report_record(
     consistency: float,
     overall: float,
     prompt_version: Optional[str] = None,
+    evaluation_version: Optional[str] = None,
 ) -> EvaluationReportRecord:
     record = EvaluationReportRecord(
         pipeline_id=pipeline_id,
@@ -73,6 +76,7 @@ def create_evaluation_report_record(
         grounding=grounding,
         consistency=consistency,
         overall=overall,
+        evaluation_version=evaluation_version,
     )
     db.add(record)
     db.commit()
@@ -90,6 +94,7 @@ def create_prompt_execution_record(
     prompt_name: str,
     prompt_version: str,
     retry_count: int = 0,
+    model: Optional[str] = None,
 ) -> PromptExecutionRecord:
     record = PromptExecutionRecord(
         pipeline_id=pipeline_id,
@@ -99,6 +104,7 @@ def create_prompt_execution_record(
         prompt_name=prompt_name,
         prompt_version=prompt_version,
         retry_count=retry_count,
+        model=model,
     )
     db.add(record)
     db.commit()

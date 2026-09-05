@@ -45,6 +45,9 @@ def _row_to_dict(row) -> Dict[str, Any]:
         "evidence": evidence,
         "confidence": row.confidence,
         "review_status": row.review_status,
+        "pipeline_id": row.pipeline_id,
+        "source": row.source,
+        "model_used": row.model_used,
         "created_at": row.created_at.isoformat() if row.created_at else None,
     }
 
@@ -104,6 +107,9 @@ class SQLBusinessMemory(BusinessMemory):
                 processing_time_ms=kwargs.get("processing_time_ms"),
                 success=kwargs.get("success", True),
                 error_message=kwargs.get("error_message"),
+                pipeline_id=kwargs.get("pipeline_id"),
+                source=kwargs.get("source"),
+                evaluation_version=kwargs.get("evaluation_version"),
             )
         except Exception as e:
             # Memory persistence must never break the pipeline.
