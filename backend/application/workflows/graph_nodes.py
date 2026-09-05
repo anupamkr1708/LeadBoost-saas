@@ -39,10 +39,11 @@ from application.dto.models import (
     MessagingOutput,
     ReviewOutput,
 )
-from application.evaluation.evaluators import build_evaluation_report
+from application.evaluation.evaluators import EVALUATION_VERSION, build_evaluation_report
 from application.memory.db_memory import SQLBusinessMemory
 from application.observability import repository as observability_repo
 from application.services import infra_adapters
+from application.services.llm_provider import get_model_name
 from application.state.lead_state import DecisionContext, LeadState
 from application.utils.stage_logger import StageTimer, stage_span
 from core.domain.schemas.lead import LeadUpdate
@@ -155,6 +156,8 @@ class LeadPipelineNodes:
                     int(result.processing_time * 1000) if result.processing_time else None
                 ),
                 scraped_data=json.dumps(result.data, default=str) if result.data else None,
+                pipeline_id=pipeline_id,
+                organization_id=lead.organization_id,
             )
             log_scraping_attempt(
                 logger=logger,
@@ -259,6 +262,8 @@ class LeadPipelineNodes:
                 enrichment_data=json.dumps(result.data, default=str),
                 confidence_score=result.confidence,
                 processing_time_ms=result.processing_time,
+                pipeline_id=pipeline_id,
+                organization_id=lead.organization_id,
             )
             log_enrichment_attempt(
                 logger=logger,
@@ -325,7 +330,20 @@ class LeadPipelineNodes:
                 reasoning=output.explanation.reasoning,
                 evidence=output.explanation.evidence,
                 confidence=output.explanation.confidence,
-                model_used=output.source,
+                # P0-D fix: this previously stored `output.source` (e.g.
+                # "llm"/"heuristic") into `model_used`, which is supposed
+                # to identify the actual model (e.g. "openai/gpt-oss-120b")
+                # -- confirmed by cross-referencing D1's requirement
+                # ("persist the model identity at execution time... do not
+                # infer it later"), which this column could not have
+                # satisfied as written. `source` (added below) now
+                # explicitly carries the llm/heuristic/fallback
+                # distinction; `model_used` now only carries the actual
+                # model identity, and only when a model was truly invoked.
+                model_used=get_model_name() if output.source == "llm" else None,
+                pipeline_id=pipeline_id,
+                source=output.source,
+                evaluation_version=EVALUATION_VERSION,
             )
 
             if output.prompt_name and pipeline_id:
@@ -339,6 +357,7 @@ class LeadPipelineNodes:
                     prompt_name=output.prompt_name,
                     prompt_version=output.prompt_version or "unknown",
                     retry_count=output.retry_count,
+                    model=get_model_name(),
                 )
 
             return context, output
@@ -435,7 +454,12 @@ class LeadPipelineNodes:
                 reasoning=output.explanation.reasoning,
                 evidence=output.explanation.evidence,
                 confidence=output.explanation.confidence,
-                model_used=output.source,
+                # P0-D fix -- see the identical note at the
+                # company_intelligence call site above.
+                model_used=get_model_name() if output.source == "llm" else None,
+                pipeline_id=pipeline_id,
+                source=output.source,
+                evaluation_version=EVALUATION_VERSION,
             )
 
             if output.prompt_name and pipeline_id:
@@ -449,6 +473,7 @@ class LeadPipelineNodes:
                     prompt_name=output.prompt_name,
                     prompt_version=output.prompt_version or "unknown",
                     retry_count=output.retry_count,
+                    model=get_model_name(),
                 )
 
             return output
@@ -550,6 +575,9 @@ class LeadPipelineNodes:
                 completeness_score=report.completeness,
                 grounding_score=report.grounding,
                 consistency_score=report.consistency,
+                pipeline_id=pipeline_id,
+                source="deterministic",
+                evaluation_version=EVALUATION_VERSION,
             )
 
             if pipeline_id:
@@ -564,6 +592,7 @@ class LeadPipelineNodes:
                     consistency=report.consistency,
                     overall=report.overall,
                     prompt_version=decision.get("prompt_version"),
+                    evaluation_version=EVALUATION_VERSION,
                 )
 
             return report
@@ -598,6 +627,9 @@ class LeadPipelineNodes:
                 agent_name=self.review_agent.name,
                 output_data=output.model_dump(),
                 review_status=output.decision,
+                pipeline_id=pipeline_id,
+                source="deterministic",
+                evaluation_version=EVALUATION_VERSION,
             )
             return output
 
@@ -667,7 +699,12 @@ class LeadPipelineNodes:
                 output_data=output.model_dump(exclude={"explanation"}),
                 reasoning=output.explanation.reasoning,
                 confidence=output.explanation.confidence,
-                model_used=output.source,
+                # P0-D fix -- see the identical note at the
+                # company_intelligence call site above.
+                model_used=get_model_name() if output.source == "llm" else None,
+                pipeline_id=pipeline_id,
+                source=output.source,
+                evaluation_version=EVALUATION_VERSION,
             )
 
             if output.prompt_name and pipeline_id:
@@ -681,6 +718,7 @@ class LeadPipelineNodes:
                     prompt_name=output.prompt_name,
                     prompt_version=output.prompt_version or "unknown",
                     retry_count=output.retry_count,
+                    model=get_model_name(),
                 )
 
             return output

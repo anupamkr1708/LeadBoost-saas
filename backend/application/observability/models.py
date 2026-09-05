@@ -23,7 +23,7 @@ back (application.memory). These tables are platform operational data
 -evolving concerns into one wide table.
 """
 
-from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String
+from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.sql import func
 
 from core.infrastructure.database import Base
@@ -53,6 +53,18 @@ class PipelineExecutionRecord(Base):
     stage_count = Column(Integer, default=0)
     error_count = Column(Integer, default=0)
 
+    # P0-B1 (pipeline execution state hardening): additive-only.
+    # Previously only a bare `error_count` existed -- no way to see
+    # *what* went wrong without cross-referencing AIDecisionLog rows for
+    # the same pipeline_id and guessing which one was the failure.
+    # (Correlating this row to the Job that triggered it, when one
+    # exists, needs no new column: Job.pipeline_id already stores this
+    # same value -- see core/domain/models/job.py -- so
+    # `Job.pipeline_id == PipelineExecutionRecord.pipeline_id` is a
+    # direct join, and attempt_count is available from Job without
+    # duplicating it here.)
+    error_message = Column(Text, nullable=True)
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -80,6 +92,12 @@ class EvaluationReportRecord(Base):
     consistency = Column(Float, default=0.0)
     overall = Column(Float, default=0.0)
 
+    # P0-D (AI provenance hardening): which evaluation methodology version
+    # (application.evaluation.evaluators.EVALUATION_VERSION) scored this
+    # row, so a future change to the evaluator's formula never silently
+    # mixes incomparable scores into the same historical series.
+    evaluation_version = Column(String, nullable=True)
+
     evaluated_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -104,6 +122,12 @@ class PromptExecutionRecord(Base):
     prompt_name = Column(String, nullable=False)
     prompt_version = Column(String, nullable=False)
     retry_count = Column(Integer, default=0)
+
+    # P0-D (AI provenance hardening): this table is, by its own docstring
+    # above, only ever written for the LLM path (source == "llm" is
+    # implicit here) -- so "model" is always the actual model identity
+    # (e.g. "openai/gpt-oss-120b") whenever a row exists, never null.
+    model = Column(String, nullable=True)
 
     executed_at = Column(DateTime(timezone=True), server_default=func.now())
 

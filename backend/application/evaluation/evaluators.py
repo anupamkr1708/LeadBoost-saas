@@ -18,6 +18,14 @@ just to check the first one.
 
 from typing import Any, Dict, List, Optional
 
+# P0-D (AI provenance hardening): bump this whenever evaluate_completeness/
+# evaluate_grounding/evaluate_consistency/build_evaluation_report's
+# methodology changes, so a persisted EvaluationReportRecord/AIDecisionLog
+# row is always traceable to which evaluation formula produced its score --
+# comparing scores across a methodology change without this would silently
+# mix incomparable numbers into one historical series.
+EVALUATION_VERSION = "eval_v1"
+
 from application.dto.models import EvaluationReport
 
 

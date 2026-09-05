@@ -39,3 +39,18 @@ yarn-error.log*
 Thumbs.db
 .vscode/
 .idea/
+# ----------------------
+# Runtime / Local Test Artifacts
+# ----------------------
+logs/
+backend/scripts/evaluation/outputs/p0_smoke/
+
+# ----------------------
+# Database Dumps / Backups
+# ----------------------
+*.dump
+*.backup
+
+*.db-journal
+*.db-wal
+*.db-shm
