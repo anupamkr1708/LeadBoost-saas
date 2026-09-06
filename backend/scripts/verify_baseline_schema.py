@@ -1,18 +1,20 @@
 """Preflight schema verification for adopting an existing database into
 Alembic (P1.1 safety requirement).
 
-`alembic stamp <baseline>` records "this database is already at this
+`alembic stamp <revision>` records "this database is already at this
 revision" WITHOUT running any DDL. Run it against a database whose schema
-doesn't actually match the baseline, and Alembic and reality silently
+doesn't actually match that revision, and Alembic and reality silently
 disagree from that point on -- the repository looks migrated while the
 real database is at a different, unknown state. This script is the gate
 that prevents that: it inspects the ACTUAL live database and compares it,
 table by table and column by column, against the current SQLAlchemy
-`Base.metadata` (== the schema the P1.1 baseline revision creates from
-scratch). See alembic/versions/<baseline>.py's docstring for the two
-adoption paths (fresh vs. existing database) this feeds into.
+`Base.metadata` (== the schema `alembic upgrade head` creates from
+scratch, whatever the current head revision is -- this script always
+compares against today's models, not a revision frozen at the time this
+script was written; see alembic/versions/<head>.py's docstring for the
+two adoption paths (fresh vs. existing database) this feeds into).
 
-DO NOT run `alembic stamp <baseline>` against ANY existing database
+DO NOT run `alembic stamp <revision>` against ANY existing database
 without first running this script against it and confirming it exits 0.
 
 Usage:
@@ -143,13 +145,13 @@ def main() -> int:
     problems = verify(db.engine)
 
     if problems:
-        print("SCHEMA VERIFICATION FAILED -- DO NOT STAMP THE BASELINE.")
+        print("SCHEMA VERIFICATION FAILED -- DO NOT STAMP.")
         print()
-        print("This database does not match the expected P1.1 baseline schema:")
+        print("This database does not match the current expected schema:")
         for p in problems:
             print(f"  - {p}")
         print()
-        print("Do not run `alembic stamp <baseline>` against this database.")
+        print("Do not run `alembic stamp <revision>` against this database.")
         print("Bring it to the expected schema through an explicitly reviewed")
         print("migration/procedure first, or discard it and initialize a fresh")
         print("database instead (`alembic upgrade head` on an empty database).")
@@ -158,7 +160,7 @@ def main() -> int:
     print("Schema verification passed.")
     print(f"All {len(db.Base.metadata.tables)} expected tables, their required")
     print("columns, and the critical P0/uniqueness constraints are present.")
-    print("Safe to run: alembic stamp <baseline-revision-id>")
+    print("Safe to run: alembic stamp head")
     return 0
 
 

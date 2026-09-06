@@ -10,8 +10,13 @@ from core.domain.models.organization import Organization
 from core.domain.models.lead import Lead, LeadEnrichmentLog, ScrapingLog, AIDecisionLog
 from core.domain.models.api_key import APIKey
 from core.domain.models.billing import Subscription, UsageRecord, Invoice
+from core.domain.models.qualification_settings import (
+    OrganizationQualificationSettings,
+    DEFAULT_QUALIFICATION_THRESHOLD,
+)
 from core.domain.schemas.user import UserCreate, UserUpdate, UserInDB
 from core.domain.schemas.organization import OrganizationCreate, OrganizationUpdate
+from core.domain.schemas.qualification_settings import QualificationSettingsUpdate
 from core.domain.schemas.lead import LeadCreate, LeadUpdate, LeadInDB
 from core.domain.schemas.api_key import APIKeyCreate, APIKeyInDB
 from passlib.context import CryptContext
@@ -138,16 +143,43 @@ def get_lead_by_url(db: Session, url: str, organization_id: int) -> Optional[Lea
 
 
 def get_leads_by_organization(
-    db: Session, organization_id: int, skip: int = 0, limit: int = 100
+    db: Session,
+    organization_id: int,
+    skip: int = 0,
+    limit: int = 100,
+    qualified: Optional[bool] = None,
+    qualification_threshold: Optional[float] = None,
 ) -> List[Lead]:
-    """Get leads for an organization with pagination"""
-    return (
-        db.query(Lead)
-        .filter(Lead.organization_id == organization_id)
-        .offset(skip)
-        .limit(limit)
-        .all()
-    )
+    """Get leads for an organization with pagination.
+
+    P1.2: `qualified` is an optional, organization-authoritative filter --
+    when set, `qualification_threshold` (the caller's resolved
+    OrganizationQualificationSettings.qualification_threshold; see
+    get_or_create_qualification_settings) must also be given. The
+    predicate is applied in this SQL query, before `.offset()/.limit()`,
+    so pagination is always computed over the already-filtered set rather
+    than filtering a page in Python after the fact.
+
+    A NULL `Lead.score` (not expected in practice -- every creation/update
+    path writes a float -- but the column has no NOT NULL constraint)
+    matches neither `qualified=True` nor `qualified=False`: SQL's
+    `NULL >= x` and `NULL < x` are both NULL/false, so an unscored lead is
+    correctly treated as "not yet known to be qualified either way" rather
+    than being guessed into either bucket.
+    """
+    query = db.query(Lead).filter(Lead.organization_id == organization_id)
+
+    if qualified is not None:
+        if qualification_threshold is None:
+            raise ValueError(
+                "qualification_threshold is required when 'qualified' filter is set"
+            )
+        if qualified:
+            query = query.filter(Lead.score >= qualification_threshold)
+        else:
+            query = query.filter(Lead.score < qualification_threshold)
+
+    return query.offset(skip).limit(limit).all()
 
 
 def get_leads_by_owner(
@@ -430,3 +462,50 @@ def create_scraping_log(
     db.commit()
     db.refresh(db_log)
     return db_log
+
+
+# Organization Qualification Settings CRUD operations (P1.2)
+#
+# There is deliberately no plain `get_qualification_settings()` that can
+# return None: every existing organization (created before this table
+# existed) and every organization created after it (create_organization()
+# above is intentionally NOT modified to also insert a settings row --
+# see the P1.2 migration's docstring for why an eager write doesn't fit
+# here) must still resolve to a well-defined threshold. Routing every
+# caller through this single get-or-create function is what makes that
+# guarantee hold everywhere, instead of relying on every call site to
+# remember to handle a missing row the same way.
+def get_or_create_qualification_settings(
+    db: Session, organization_id: int
+) -> OrganizationQualificationSettings:
+    """Get an organization's qualification settings, creating a row with
+    the backward-compatible default threshold (DEFAULT_QUALIFICATION_THRESHOLD,
+    matching the existing "Warm Lead" cutoff) the first time it's read."""
+    settings = (
+        db.query(OrganizationQualificationSettings)
+        .filter(OrganizationQualificationSettings.organization_id == organization_id)
+        .first()
+    )
+    if settings is None:
+        settings = OrganizationQualificationSettings(
+            organization_id=organization_id,
+            qualification_threshold=DEFAULT_QUALIFICATION_THRESHOLD,
+        )
+        db.add(settings)
+        db.commit()
+        db.refresh(settings)
+    return settings
+
+
+def update_qualification_settings(
+    db: Session, organization_id: int, settings_update: QualificationSettingsUpdate
+) -> OrganizationQualificationSettings:
+    """Update (creating first if necessary) an organization's qualification
+    settings. Never touches Lead.score or Lead.qualification_label -- see
+    core/domain/models/qualification_settings.py."""
+    settings = get_or_create_qualification_settings(db, organization_id)
+    for field, value in settings_update.dict(exclude_unset=True).items():
+        setattr(settings, field, value)
+    db.commit()
+    db.refresh(settings)
+    return settings

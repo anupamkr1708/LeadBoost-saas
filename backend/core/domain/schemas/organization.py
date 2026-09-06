@@ -22,6 +22,11 @@ class OrganizationUpdate(BaseModel):
     plan_tier: Optional[str] = None
     max_users: Optional[int] = None
     max_leads: Optional[int] = None
+    # P1.2 (Company Profile): minimal extension, see
+    # core/domain/models/organization.py for why these live directly on
+    # Organization rather than a separate CompanyProfile table.
+    industry: Optional[str] = None
+    icp_description: Optional[str] = None
 
 
 class OrganizationInDBBase(OrganizationBase):
@@ -33,6 +38,8 @@ class OrganizationInDBBase(OrganizationBase):
     stripe_customer_id: Optional[str] = None
     stripe_subscription_id: Optional[str] = None
     is_active: bool
+    industry: Optional[str] = None
+    icp_description: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 
