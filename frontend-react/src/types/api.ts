@@ -15,6 +15,10 @@ export interface User {
   is_active: boolean;
   is_verified: boolean;
   organization_id: number | null;
+  // P1.2 (Sender Profile) — see backend core/domain/models/user.py.
+  // No SMTP/mailbox credentials here by design.
+  job_title: string | null;
+  signature: string | null;
   created_at: string;
   updated_at: string | null;
 }
@@ -30,6 +34,8 @@ export interface UserUpdate {
   first_name?: string | null;
   last_name?: string | null;
   is_active?: boolean | null;
+  job_title?: string | null;
+  signature?: string | null;
 }
 
 export interface LoginResponse {
@@ -167,10 +173,32 @@ export interface LeadAIInsights {
   messaging: MessagingInsight | null;
 }
 
+/**
+ * P1.2: `Lead` plus the organization-authoritative qualification
+ * derivation. Returned by GET /leads/ (list) and as the base of
+ * `LeadDetail` (GET /leads/{id}).
+ *
+ * `is_qualified` is NOT a stored field — the backend computes it at read
+ * time from this lead's `score` and the requesting organization's
+ * qualification_threshold (see the Qualification Settings section below),
+ * so changing the threshold changes this value immediately without ever
+ * rewriting `score` or `qualification_label`. It intentionally does NOT
+ * replace `qualification_label`: that's the legacy 80/60/40 score-band
+ * classification, and the two are allowed to disagree (e.g. a lenient
+ * organization's threshold can make a "Cold Lead" `is_qualified: true`).
+ * Always prefer `is_qualified` over deriving qualification from
+ * `qualification_label` yourself — see QUALIFICATION_STYLES in
+ * lib/constants.ts for why a hardcoded label check was the root cause of
+ * a real dashboard bug.
+ */
+export interface LeadWithQualification extends Lead {
+  is_qualified: boolean;
+}
+
 /** Response shape of GET /leads/{id} specifically — every `Lead` field plus
  * the AI insights bundle that only that endpoint returns (list/create/update
  * responses are the plain `Lead` shape and do not include it). */
-export interface LeadDetail extends Lead {
+export interface LeadDetail extends LeadWithQualification {
   ai_insights: LeadAIInsights;
 }
 
@@ -244,6 +272,10 @@ export interface Organization {
   stripe_customer_id: string | null;
   stripe_subscription_id: string | null;
   is_active: boolean;
+  // P1.2 (Company Profile) — see backend core/domain/models/organization.py.
+  // Profile/configuration data only; not consumed by the AI pipeline.
+  industry: string | null;
+  icp_description: string | null;
   created_at: string;
   updated_at: string | null;
 }
@@ -259,6 +291,30 @@ export interface OrganizationUpdate {
   plan_tier?: string | null;
   max_users?: number | null;
   max_leads?: number | null;
+  industry?: string | null;
+  icp_description?: string | null;
+}
+
+/**
+ * P1.2: organization-scoped lead-qualification policy.
+ * Provenance: GET/PUT /api/v2/organizations/{org_id}/qualification-settings,
+ * backend core/domain/schemas/qualification_settings.py.
+ *
+ * `qualification_threshold` is on the SAME 0–100 scale as `Lead.score`
+ * (not 0–1) — the minimum score this organization considers qualified.
+ * Distinct from any individual lead's `score`/`qualification_label`; see
+ * `LeadWithQualification` above.
+ */
+export interface QualificationSettings {
+  id: number;
+  organization_id: number;
+  qualification_threshold: number;
+  created_at: string;
+  updated_at: string | null;
+}
+
+export interface QualificationSettingsUpdate {
+  qualification_threshold?: number | null;
 }
 
 // ---------- Billing ----------

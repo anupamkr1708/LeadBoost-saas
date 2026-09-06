@@ -24,8 +24,14 @@ export default function DashboardPage() {
 
   const today = new Date().toDateString();
   const todaysLeads = leads?.filter((l) => new Date(l.created_at).toDateString() === today).length ?? 0;
-  const qualifiedLeads =
-    leads?.filter((l) => ["qualified", "hot", "warm"].includes((l.qualification_label || "").toLowerCase())).length ?? 0;
+  // P1.2 fix: this used to check `["qualified","hot","warm"].includes(
+  // qualification_label.toLowerCase())`, but the backend's real labels are
+  // "Hot Lead"/"Warm Lead"/"Cold Lead"/"Disqualified" — "hot lead" never
+  // matched "hot", so this always read zero regardless of real data.
+  // `is_qualified` is the backend's authoritative derivation (lead.score
+  // vs. this organization's qualification_threshold) — see
+  // types/api.ts::LeadWithQualification.
+  const qualifiedLeads = leads?.filter((l) => l.is_qualified).length ?? 0;
   const avgScore = leads && leads.length > 0 ? leads.reduce((sum, l) => sum + (l.score || 0), 0) / leads.length : 0;
 
   return (

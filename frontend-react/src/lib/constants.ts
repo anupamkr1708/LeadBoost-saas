@@ -10,19 +10,43 @@ export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost
 /** localStorage keys for the persisted auth session. */
 export const AUTH_STORAGE_KEY = "leadboost-auth";
 
-/** Qualification labels as produced by the backend scoring pipeline (display-only mapping). */
+/**
+ * Qualification labels as produced by the backend scoring pipeline
+ * (display-only mapping). Keys MUST match the lowercased values backend
+ * core.domain.services.scoring.LeadScoringService._classify_lead actually
+ * produces — "Hot Lead" / "Warm Lead" / "Cold Lead" / "Disqualified" — not
+ * "hot"/"warm"/"cold"/"qualified". A prior version of this map used the
+ * shorter keys, which meant every real label failed the lookup here (and,
+ * far more seriously, in the dashboard's "Qualified leads" KPI, which
+ * checked `qualification_label.toLowerCase()` against a `["qualified",
+ * "hot", "warm"]` list — a check that could never be true, so the KPI
+ * always read zero regardless of real data). See `IS_QUALIFIED_STYLE`
+ * below and `LeadWithQualification.is_qualified` in types/api.ts for the
+ * field that actually answers "is this lead qualified" — this map is
+ * purely for displaying the legacy score-band label, nothing more.
+ */
 export const QUALIFICATION_STYLES: Record<string, { label: string; className: string }> = {
-  hot: { label: "Hot", className: "bg-rose-500/15 text-rose-300 border-rose-500/30" },
-  warm: { label: "Warm", className: "bg-amber-500/15 text-amber-300 border-amber-500/30" },
-  cold: { label: "Cold", className: "bg-sky-500/15 text-sky-300 border-sky-500/30" },
-  qualified: { label: "Qualified", className: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30" },
-  unqualified: { label: "Unqualified", className: "bg-white/10 text-muted-foreground border-white/10" },
+  "hot lead": { label: "Hot Lead", className: "bg-rose-500/15 text-rose-300 border-rose-500/30" },
+  "warm lead": { label: "Warm Lead", className: "bg-amber-500/15 text-amber-300 border-amber-500/30" },
+  "cold lead": { label: "Cold Lead", className: "bg-sky-500/15 text-sky-300 border-sky-500/30" },
+  disqualified: { label: "Disqualified", className: "bg-white/10 text-muted-foreground border-white/10" },
 };
 
 export const DEFAULT_QUALIFICATION_STYLE = {
   label: "Unscored",
   className: "bg-white/10 text-muted-foreground border-white/10",
 };
+
+/**
+ * P1.2: display treatment for the authoritative `is_qualified` boolean
+ * (lead.score >= this organization's qualification_threshold). Use this,
+ * not QUALIFICATION_STYLES, anywhere the UI needs to say whether a lead
+ * counts as qualified for this organization.
+ */
+export const IS_QUALIFIED_STYLE = {
+  true: { label: "Qualified", className: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30" },
+  false: { label: "Not qualified", className: "bg-white/10 text-muted-foreground border-white/10" },
+} as const;
 
 /** Pipeline / discovery status → visual treatment. */
 export const STATUS_STYLES: Record<string, { label: string; className: string; dot: string }> = {

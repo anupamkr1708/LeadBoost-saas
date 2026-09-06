@@ -4,12 +4,19 @@ import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from "recha
 import type { Lead } from "@/types/api";
 import { QUALIFICATION_STYLES } from "@/lib/constants";
 
+// P1.2: keyed by the backend's actual qualification_label values
+// (lowercased) — "Hot Lead"/"Warm Lead"/"Cold Lead"/"Disqualified" — not
+// the shorter "hot"/"warm"/"cold"/"qualified" this map previously used,
+// which meant every real label fell through to the grey fallback color
+// below. Same underlying vocabulary mismatch as QUALIFICATION_STYLES in
+// lib/constants.ts; kept as a separate map here only because chart slice
+// colors are a slightly different concern from badge className, not
+// because the keys should ever diverge again.
 const COLORS: Record<string, string> = {
-  hot: "#F43F5E",
-  warm: "#F59E0B",
-  cold: "#38BDF8",
-  qualified: "#10B981",
-  unqualified: "#8B8794",
+  "hot lead": "#F43F5E",
+  "warm lead": "#F59E0B",
+  "cold lead": "#38BDF8",
+  disqualified: "#8B8794",
 };
 
 interface QualificationChartProps {
@@ -20,11 +27,11 @@ interface QualificationChartProps {
 export function QualificationChart({ leads }: QualificationChartProps) {
   const counts = new Map<string, number>();
   leads.forEach((l) => {
-    const key = (l.qualification_label || "unqualified").toLowerCase();
+    const key = (l.qualification_label || "").toLowerCase();
     counts.set(key, (counts.get(key) ?? 0) + 1);
   });
   const data = Array.from(counts.entries()).map(([key, value]) => ({
-    name: QUALIFICATION_STYLES[key]?.label ?? key,
+    name: QUALIFICATION_STYLES[key]?.label ?? (key || "Unscored"),
     key,
     value,
   }));

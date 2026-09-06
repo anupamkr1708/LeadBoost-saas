@@ -1,5 +1,5 @@
 import { apiClient } from "@/lib/api-client";
-import type { Lead, LeadCreate, LeadDetail, LeadProcessRequest, LeadUpdate } from "@/types/api";
+import type { Lead, LeadCreate, LeadDetail, LeadProcessRequest, LeadUpdate, LeadWithQualification } from "@/types/api";
 
 /**
  * Leads endpoints — maps 1:1 to the `leads` tag in the OpenAPI spec.
@@ -7,8 +7,11 @@ import type { Lead, LeadCreate, LeadDetail, LeadProcessRequest, LeadUpdate } fro
  * GET/PUT/DELETE /api/v2/leads/{lead_id}, POST /api/v2/leads/{lead_id}/process.
  */
 export const leadsApi = {
-  list: (params: { skip?: number; limit?: number } = {}) =>
-    apiClient.get<Lead[]>("/api/v2/leads/", { params }).then((r) => r.data),
+  // P1.2: response now includes the derived `is_qualified` per lead, and
+  // accepts an optional authoritative `?qualified=true|false` filter
+  // (applied server-side, before pagination) — see LeadWithQualification.
+  list: (params: { skip?: number; limit?: number; qualified?: boolean } = {}) =>
+    apiClient.get<LeadWithQualification[]>("/api/v2/leads/", { params }).then((r) => r.data),
 
   createFromUrls: (payload: LeadProcessRequest) =>
     apiClient.post<Lead[]>("/api/v2/leads/", payload).then((r) => r.data),

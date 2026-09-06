@@ -6,6 +6,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { UserCircle, Mail, ShieldCheck, Building2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -27,7 +28,14 @@ export default function ProfilePage() {
   } = useForm<ProfileEditValues>({ resolver: zodResolver(profileEditSchema) });
 
   useEffect(() => {
-    if (user) reset({ first_name: user.first_name, last_name: user.last_name });
+    if (user) {
+      reset({
+        first_name: user.first_name,
+        last_name: user.last_name,
+        job_title: user.job_title,
+        signature: user.signature,
+      });
+    }
   }, [user, reset]);
 
   return (
@@ -75,6 +83,19 @@ export default function ProfilePage() {
                       <Label htmlFor="last_name">Last name</Label>
                       <Input id="last_name" {...register("last_name")} />
                     </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="job_title">Job title</Label>
+                    <Input id="job_title" {...register("job_title")} placeholder="e.g. Head of Growth" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="signature">Signature</Label>
+                    <Textarea
+                      id="signature"
+                      rows={3}
+                      {...register("signature")}
+                      placeholder="e.g. Best,&#10;Jane Doe"
+                    />
                   </div>
                   <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3 text-xs text-muted-foreground">
                     Member since {formatDate(user?.created_at)} · Account {user?.is_verified ? "verified" : "unverified"}
