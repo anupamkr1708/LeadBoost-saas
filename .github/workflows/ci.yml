@@ -56,6 +56,86 @@ jobs:
         continue-on-error: true
         run: mypy . || true
 
+  migrations:
+    name: PostgreSQL migration validation
+    runs-on: ubuntu-latest
+    # Additive alongside backend-tests (which stays SQLite-only, unchanged)
+    # -- this job validates the actual Alembic/PostgreSQL path P1.1 adds:
+    # a fresh-database upgrade, the baseline revision's own no-drop
+    # guarantee, single-head, `alembic check`, and (via
+    # test_alembic_postgres_migrations.py) the existing-database
+    # verify-then-stamp adoption flow. It does not replace or reduce
+    # backend-tests in any way.
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: leadboost
+          POSTGRES_PASSWORD: leadboost
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U leadboost"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio
+
+      - name: alembic upgrade head (fresh database)
+        env:
+          DATABASE_URL: "postgresql://leadboost:leadboost@localhost:5432/leadboost_ci"
+          SECRET_KEY: "ci-test-secret-not-for-production-use-only"
+          ENVIRONMENT: "development"
+        run: |
+          PGPASSWORD=leadboost psql -h localhost -U leadboost -d postgres \
+            -c "CREATE DATABASE leadboost_ci;"
+          alembic upgrade head
+
+      - name: alembic check (no pending changes after upgrade)
+        env:
+          DATABASE_URL: "postgresql://leadboost:leadboost@localhost:5432/leadboost_ci"
+          SECRET_KEY: "ci-test-secret-not-for-production-use-only"
+          ENVIRONMENT: "development"
+        run: alembic check
+
+      - name: Verify exactly one migration head
+        env:
+          DATABASE_URL: "postgresql://leadboost:leadboost@localhost:5432/leadboost_ci"
+          SECRET_KEY: "ci-test-secret-not-for-production-use-only"
+          ENVIRONMENT: "development"
+        run: |
+          heads=$(alembic heads | wc -l)
+          if [ "$heads" -ne 1 ]; then
+            echo "Expected exactly one Alembic head, found $heads:"
+            alembic heads
+            exit 1
+          fi
+
+      - name: Run migration-focused tests (fresh upgrade, existing-schema adoption, drift detection)
+        env:
+          DATABASE_URL: "sqlite:///./ci_migrations_test.db"
+          ALEMBIC_TEST_DATABASE_URL: "postgresql://leadboost:leadboost@localhost:5432/postgres"
+          SECRET_KEY: "ci-test-secret-not-for-production-use-only"
+          ENVIRONMENT: "development"
+        run: pytest tests/infrastructure/test_alembic_metadata.py tests/infrastructure/test_alembic_postgres_migrations.py -v
+
   backend-tests:
     name: Backend unit tests
     runs-on: ubuntu-latest

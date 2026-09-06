@@ -18,6 +18,24 @@
 -- Supported starting point:
 --   The jobs table is absent (this is the pre-P0 schema).
 --
+-- ============================================================================
+-- P1.1 STATUS NOTE (added when Alembic was introduced -- this file's SQL
+-- above and below is otherwise completely unmodified):
+--
+--   This file is preserved as historical documentation of the one-time,
+--   hand-written migration that brought a pre-P0 PostgreSQL database to
+--   the P0 schema shape. It is NOT superseded, deleted, or replaced -- but
+--   it is also no longer how schema changes happen going forward.
+--
+--   As of P1.1, Alembic (see backend/alembic/) is the only mechanism for
+--   FUTURE schema changes. The current full schema (this file's P0 delta,
+--   plus everything since) is captured in full by Alembic's baseline
+--   revision (backend/alembic/versions/*_baseline_adopt_current_schema*.py).
+--   Do not add a 002_*.sql file here for anything new -- use
+--   `alembic revision --autogenerate` instead. See docs/DEPLOYMENT.md's
+--   "Database migrations" section for the actual workflow.
+-- ============================================================================
+--
 -- Safety:
 --   If a jobs table already exists, we validate that it is structurally
 --   compatible rather than silently accepting a potentially partial schema.

@@ -1,0 +1,6 @@
+Alembic migration environment for LeadBoost SaaS.
+
+See docs/DEPLOYMENT.md ("Database migrations") for the actual developer
+and production workflow (creating, reviewing, and applying revisions;
+adopting an existing database safely). This directory is configuration,
+not documentation.
