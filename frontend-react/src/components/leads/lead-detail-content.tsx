@@ -23,7 +23,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
-import { QualificationBadge, StatusBadge } from "@/components/shared/status-badge";
+import { QualificationBadge, IsQualifiedBadge, StatusBadge } from "@/components/shared/status-badge";
 import { ScoreRing } from "@/components/shared/score-ring";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { useLead, useUpdateLead, useDeleteLead, useProcessLead } from "@/features/leads/hooks";
@@ -100,8 +100,9 @@ export function LeadDetailContent({ leadId, onDeleted }: LeadDetailContentProps)
             >
               {getHostname(lead.website)} <ExternalLink className="h-3 w-3" />
             </a>
-            <div className="mt-2">
+            <div className="mt-2 flex flex-wrap items-center gap-2">
               <QualificationBadge label={lead.qualification_label} />
+              <IsQualifiedBadge isQualified={lead.is_qualified} />
             </div>
           </div>
         </div>

@@ -20,18 +20,18 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { QualificationBadge } from "@/components/shared/status-badge";
+import { QualificationBadge, IsQualifiedBadge } from "@/components/shared/status-badge";
 import { ScoreRing } from "@/components/shared/score-ring";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/shared/empty-state";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { useDeleteLead, useProcessLead } from "@/features/leads/hooks";
 import { ensureProtocol, formatDate, getHostname } from "@/lib/utils";
-import type { Lead } from "@/types/api";
+import type { LeadWithQualification } from "@/types/api";
 import { Users } from "lucide-react";
 
 interface LeadsTableProps {
-  leads: Lead[];
+  leads: LeadWithQualification[];
   loading: boolean;
   onOpenLead: (leadId: number) => void;
 }
@@ -40,12 +40,12 @@ export function LeadsTable({ leads, loading, onOpenLead }: LeadsTableProps) {
   const [sorting, setSorting] = useState<SortingState>([{ id: "created_at", desc: true }]);
   const [rowSelection, setRowSelection] = useState<Record<string, boolean>>({});
   const [globalFilter, setGlobalFilter] = useState("");
-  const [deleteTarget, setDeleteTarget] = useState<Lead | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<LeadWithQualification | null>(null);
 
   const deleteLead = useDeleteLead();
   const processLead = useProcessLead();
 
-  const columns = useMemo<ColumnDef<Lead>[]>(
+  const columns = useMemo<ColumnDef<LeadWithQualification>[]>(
     () => [
       {
         id: "select",
@@ -103,6 +103,16 @@ export function LeadsTable({ leads, loading, onOpenLead }: LeadsTableProps) {
         accessorKey: "qualification_label",
         header: "Qualification",
         cell: ({ getValue }) => <QualificationBadge label={getValue() as string} />,
+      },
+      {
+        // P1.2: the organization-authoritative derivation (this lead's
+        // score vs. the org's qualification_threshold, set on the
+        // Organization page) — distinct from the legacy "Qualification"
+        // column above, and allowed to disagree with it. See
+        // types/api.ts::LeadWithQualification.
+        accessorKey: "is_qualified",
+        header: "Qualified",
+        cell: ({ getValue }) => <IsQualifiedBadge isQualified={getValue() as boolean} />,
       },
       {
         accessorKey: "score",

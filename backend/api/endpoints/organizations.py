@@ -15,11 +15,17 @@ from core.domain.schemas.organization import (
     OrganizationCreate,
     OrganizationUpdate,
 )
+from core.domain.schemas.qualification_settings import (
+    QualificationSettings as QualificationSettingsSchema,
+    QualificationSettingsUpdate,
+)
 from core.infrastructure.database.crud import (
     create_organization,
     get_organization,
     get_organization_by_name,
     update_organization,
+    get_or_create_qualification_settings,
+    update_qualification_settings,
 )
 
 router = APIRouter(prefix="/organizations")
@@ -143,3 +149,53 @@ async def update_org(
         )
 
     return organization
+
+
+# P1.2: Organization Qualification Settings.
+#
+# Reuses the exact same "current_user.organization_id != org_id -> 403"
+# ownership check as read_organization_by_id/update_org above -- no second
+# authorization mechanism. get_or_create_qualification_settings() (see
+# core/infrastructure/database/crud.py) guarantees a row always exists by
+# the time a response is built, so there is no 404 case here the way there
+# is for the organization itself.
+@router.get("/{org_id}/qualification-settings", response_model=QualificationSettingsSchema)
+async def read_qualification_settings(
+    org_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Any:
+    """Get the current organization's lead-qualification policy (the
+    minimum Lead.score this organization considers qualified). Distinct
+    from Lead.score/Lead.qualification_label, which are unaffected by
+    this setting -- see core/domain/models/qualification_settings.py."""
+    if current_user.organization_id != org_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this organization",
+        )
+
+    return get_or_create_qualification_settings(db, org_id)
+
+
+@router.put("/{org_id}/qualification-settings", response_model=QualificationSettingsSchema)
+async def update_qualification_settings_endpoint(
+    org_id: int,
+    settings_update: QualificationSettingsUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Any:
+    """Update the current organization's qualification threshold.
+
+    This only ever changes what counts as "qualified" going forward for
+    this organization -- it never rewrites Lead.score, never touches
+    Lead.qualification_label, and never triggers AI reprocessing (see
+    api/endpoints/leads.py's `is_qualified` derivation, computed at read
+    time from this value)."""
+    if current_user.organization_id != org_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this organization",
+        )
+
+    return update_qualification_settings(db, org_id, settings_update)

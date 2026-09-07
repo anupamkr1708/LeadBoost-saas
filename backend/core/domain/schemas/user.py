@@ -21,6 +21,11 @@ class UserUpdate(BaseModel):
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     is_active: Optional[bool] = None
+    # P1.2 (Sender Profile): minimal extension, see
+    # core/domain/models/user.py for why sender identity lives on User
+    # rather than a new table.
+    job_title: Optional[str] = None
+    signature: Optional[str] = None
 
 
 class UserInDBBase(UserBase):
@@ -28,6 +33,8 @@ class UserInDBBase(UserBase):
     is_active: bool
     is_verified: bool
     organization_id: Optional[int] = None
+    job_title: Optional[str] = None
+    signature: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 

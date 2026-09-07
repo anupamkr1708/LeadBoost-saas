@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Building2, Users, Gauge } from "lucide-react";
+import { Building2, Users, Gauge, Target } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -11,8 +11,13 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
-import { useOrganization, useUpdateOrganization } from "@/features/organizations/hooks";
-import { orgEditSchema, type OrgEditValues } from "@/lib/validation";
+import {
+  useOrganization,
+  useUpdateOrganization,
+  useQualificationSettings,
+  useUpdateQualificationSettings,
+} from "@/features/organizations/hooks";
+import { orgEditSchema, type OrgEditValues, qualificationSettingsSchema, type QualificationSettingsValues } from "@/lib/validation";
 import { formatDate } from "@/lib/utils";
 
 export default function OrganizationPage() {
@@ -27,8 +32,31 @@ export default function OrganizationPage() {
   } = useForm<OrgEditValues>({ resolver: zodResolver(orgEditSchema) });
 
   useEffect(() => {
-    if (org) reset({ name: org.name, description: org.description });
+    if (org) {
+      reset({
+        name: org.name,
+        description: org.description,
+        industry: org.industry,
+        icp_description: org.icp_description,
+      });
+    }
   }, [org, reset]);
+
+  const { data: qualificationSettings, isLoading: qualificationLoading } = useQualificationSettings(org?.id ?? 0);
+  const updateQualificationSettings = useUpdateQualificationSettings(org?.id ?? 0);
+
+  const {
+    register: registerQualification,
+    handleSubmit: handleSubmitQualification,
+    reset: resetQualification,
+    formState: { isDirty: isQualificationDirty, errors: qualificationErrors },
+  } = useForm<QualificationSettingsValues>({ resolver: zodResolver(qualificationSettingsSchema) });
+
+  useEffect(() => {
+    if (qualificationSettings) {
+      resetQualification({ qualification_threshold: qualificationSettings.qualification_threshold });
+    }
+  }, [qualificationSettings, resetQualification]);
 
   return (
     <div className="space-y-8">
@@ -64,9 +92,78 @@ export default function OrganizationPage() {
                 <Label htmlFor="description">Description</Label>
                 <Textarea id="description" rows={3} {...register("description")} placeholder="What does your team do?" />
               </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="industry">Industry</Label>
+                <Input id="industry" {...register("industry")} placeholder="e.g. B2B SaaS" />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="icp_description">Ideal customer profile</Label>
+                <Textarea
+                  id="icp_description"
+                  rows={3}
+                  {...register("icp_description")}
+                  placeholder="Who do you want your leads to be? e.g. Series A-C fintech companies, 50-500 employees"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Profile information only — this doesn&apos;t change how leads are scored. To control which leads
+                  count as qualified, use the threshold below.
+                </p>
+              </div>
               {isDirty && (
                 <Button type="submit" loading={updateOrg.isPending}>
                   Save changes
+                </Button>
+              )}
+            </form>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Target className="h-4 w-4 text-muted-foreground" /> Qualification
+          </CardTitle>
+          <CardDescription>
+            Set the minimum lead score your organization considers qualified. This doesn&apos;t change any lead&apos;s
+            score — it only changes which leads are marked qualified.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="pt-0">
+          {qualificationLoading ? (
+            <Skeleton className="h-16 w-full" />
+          ) : (
+            <form
+              onSubmit={handleSubmitQualification((values) => updateQualificationSettings.mutate(values))}
+              className="space-y-4"
+            >
+              <div className="space-y-1.5">
+                <Label htmlFor="qualification_threshold">Qualification threshold</Label>
+                <div className="flex items-center gap-3">
+                  <Input
+                    id="qualification_threshold"
+                    type="number"
+                    min={0}
+                    max={100}
+                    step={0.5}
+                    className="w-28"
+                    error={!!qualificationErrors.qualification_threshold}
+                    {...registerQualification("qualification_threshold", { valueAsNumber: true })}
+                  />
+                  <span className="text-sm text-muted-foreground">out of 100 (a lead&apos;s AI score)</span>
+                </div>
+                {qualificationErrors.qualification_threshold && (
+                  <p className="text-xs text-rose-400">{qualificationErrors.qualification_threshold.message}</p>
+                )}
+                <p className="text-xs text-muted-foreground">
+                  A lead with a score at or above this threshold shows as <strong>Qualified</strong>. Changing this
+                  never rewrites any lead&apos;s score or reruns AI processing — it only changes how existing scores
+                  are interpreted, immediately, for every lead.
+                </p>
+              </div>
+              {isQualificationDirty && (
+                <Button type="submit" loading={updateQualificationSettings.isPending}>
+                  Save threshold
                 </Button>
               )}
             </form>

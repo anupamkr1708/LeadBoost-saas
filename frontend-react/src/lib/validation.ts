@@ -62,11 +62,27 @@ export type LeadEditValues = z.infer<typeof leadEditSchema>;
 export const orgEditSchema = z.object({
   name: z.string().min(1, "Organization name is required"),
   description: z.string().nullable().optional(),
+  // P1.2 (Company Profile)
+  industry: z.string().nullable().optional(),
+  icp_description: z.string().nullable().optional(),
 });
 export type OrgEditValues = z.infer<typeof orgEditSchema>;
+
+// P1.2: organization qualification threshold, same 0–100 scale as
+// Lead.score (see backend core/domain/models/qualification_settings.py).
+export const qualificationSettingsSchema = z.object({
+  qualification_threshold: z
+    .number({ invalid_type_error: "Enter a number between 0 and 100" })
+    .min(0, "Must be at least 0")
+    .max(100, "Must be at most 100"),
+});
+export type QualificationSettingsValues = z.infer<typeof qualificationSettingsSchema>;
 
 export const profileEditSchema = z.object({
   first_name: z.string().nullable().optional(),
   last_name: z.string().nullable().optional(),
+  // P1.2 (Sender Profile)
+  job_title: z.string().nullable().optional(),
+  signature: z.string().nullable().optional(),
 });
 export type ProfileEditValues = z.infer<typeof profileEditSchema>;

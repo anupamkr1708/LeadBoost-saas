@@ -1,5 +1,5 @@
 import { Badge } from "@/components/ui/badge";
-import { QUALIFICATION_STYLES, DEFAULT_QUALIFICATION_STYLE, STATUS_STYLES } from "@/lib/constants";
+import { QUALIFICATION_STYLES, DEFAULT_QUALIFICATION_STYLE, IS_QUALIFIED_STYLE, STATUS_STYLES } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 
 /** Renders a pipeline/discovery status ("SUCCESS", "FAILED", ...) with a matching dot + color. */
@@ -18,9 +18,21 @@ export function StatusBadge({ status }: { status: string | null | undefined }) {
   );
 }
 
-/** Renders a lead qualification_label ("hot", "warm", ...) with a matching color treatment. */
+/** Renders a lead qualification_label ("Hot Lead", "Warm Lead", ...) with a matching color treatment. */
 export function QualificationBadge({ label }: { label: string | null | undefined }) {
   const key = label?.toLowerCase() ?? "";
   const style = QUALIFICATION_STYLES[key] ?? { ...DEFAULT_QUALIFICATION_STYLE, label: label || "Unscored" };
+  return <span className={cn("inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium", style.className)}>{style.label}</span>;
+}
+
+/**
+ * P1.2: renders the authoritative `is_qualified` derivation (this lead's
+ * score compared against the organization's qualification_threshold) —
+ * distinct from `QualificationBadge` above, which only shows the legacy
+ * score-band label. The two are allowed to disagree; see
+ * `LeadWithQualification` in types/api.ts.
+ */
+export function IsQualifiedBadge({ isQualified }: { isQualified: boolean }) {
+  const style = IS_QUALIFIED_STYLE[isQualified ? "true" : "false"];
   return <span className={cn("inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium", style.className)}>{style.label}</span>;
 }

@@ -3,7 +3,7 @@ Lead management endpoints
 """
 
 import asyncio
-from typing import Any, List, Dict
+from typing import Any, List, Dict, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.orm import Session
 
@@ -16,6 +16,7 @@ from core.domain.schemas.lead import (
     LeadCreate,
     LeadDetail,
     LeadUpdate,
+    LeadWithQualification,
 )
 from pydantic import BaseModel
 from core.infrastructure.database.crud import (
@@ -25,6 +26,7 @@ from core.infrastructure.database.crud import (
     update_lead,
     delete_lead,
     get_lead_by_url,
+    get_or_create_qualification_settings,
 )
 from core.infrastructure.scraping.scraper import get_scraper, TieredScraper
 from core.infrastructure.logging import get_logger, log_scraping_attempt
@@ -39,6 +41,17 @@ from sqlalchemy.exc import IntegrityError
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/leads")
+
+
+def _is_qualified(score: Optional[float], threshold: float) -> bool:
+    """P1.2's single, deterministic qualification predicate. Deliberately
+    plain Python -- no LLM call, no business-policy branching -- see
+    core/domain/models/qualification_settings.py for why. A NULL score
+    (not expected in practice, but the column allows it) is treated as
+    "not yet known to be qualified" rather than guessed either way,
+    matching the same NULL-handling already applied in
+    crud.get_leads_by_organization's SQL-level filter."""
+    return score is not None and score >= threshold
 
 
 class LeadProcessRequest(BaseModel):
@@ -353,14 +366,25 @@ async def create_lead_endpoint(
         )
 
 
-@router.get("/", response_model=List[LeadSchema])
+@router.get("/", response_model=List[LeadWithQualification])
 async def read_leads(
     skip: int = 0,
     limit: int = 100,
+    qualified: Optional[bool] = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> Any:
-    """Get leads for current user's organization with pagination"""
+    """Get leads for current user's organization with pagination.
+
+    P1.2: every returned lead now carries a derived `is_qualified`
+    (lead.score >= this organization's qualification_threshold), and an
+    optional `?qualified=true|false` query param filters server-side --
+    applied in the database query, before pagination -- rather than
+    requiring the frontend to guess qualification from
+    `qualification_label` string values (see
+    core/domain/schemas/lead.py::LeadWithQualification for why the two
+    fields are allowed to disagree).
+    """
     # Validate pagination params
     if skip < 0:
         raise HTTPException(
@@ -374,8 +398,18 @@ async def read_leads(
             detail="Limit must be between 1 and 1000"
         )
 
+    qualification_settings = get_or_create_qualification_settings(
+        db, current_user.organization_id
+    )
+    threshold = qualification_settings.qualification_threshold
+
     leads = get_leads_by_organization(
-        db, organization_id=current_user.organization_id, skip=skip, limit=limit
+        db,
+        organization_id=current_user.organization_id,
+        skip=skip,
+        limit=limit,
+        qualified=qualified,
+        qualification_threshold=threshold if qualified is not None else None,
     )
 
     logger.info(
@@ -386,10 +420,17 @@ async def read_leads(
             "count": len(leads),
             "skip": skip,
             "limit": limit,
+            "qualified_filter": qualified,
         }
     )
 
-    return leads
+    return [
+        LeadWithQualification(
+            **LeadSchema.model_validate(lead).model_dump(),
+            is_qualified=_is_qualified(lead.score, threshold),
+        )
+        for lead in leads
+    ]
 
 
 @router.get("/{lead_id}", response_model=LeadDetail)
@@ -416,7 +457,14 @@ async def read_lead(
         )
 
     ai_insights = get_lead_ai_insights(db, lead_id)
-    return LeadDetail(**LeadSchema.model_validate(lead).model_dump(), ai_insights=ai_insights)
+    qualification_settings = get_or_create_qualification_settings(
+        db, current_user.organization_id
+    )
+    return LeadDetail(
+        **LeadSchema.model_validate(lead).model_dump(),
+        ai_insights=ai_insights,
+        is_qualified=_is_qualified(lead.score, qualification_settings.qualification_threshold),
+    )
 
 
 @router.put("/{lead_id}", response_model=LeadSchema)

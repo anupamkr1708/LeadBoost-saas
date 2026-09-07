@@ -6,7 +6,7 @@ import { leadsApi } from "@/features/leads/api";
 import { normalizeApiError } from "@/lib/api-client";
 import type { LeadCreate, LeadProcessRequest, LeadUpdate } from "@/types/api";
 
-export function useLeads(params: { skip?: number; limit?: number } = {}) {
+export function useLeads(params: { skip?: number; limit?: number; qualified?: boolean } = {}) {
   return useQuery({
     queryKey: ["leads", params],
     queryFn: () => leadsApi.list(params),

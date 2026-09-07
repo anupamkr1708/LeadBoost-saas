@@ -96,11 +96,32 @@ class LeadInDB(LeadInDBBase):
     pass
 
 
-class LeadDetail(Lead):
+class LeadWithQualification(Lead):
+    """`Lead` plus the P1.2 organization-authoritative qualification
+    derivation. Purely additive on top of `Lead`.
+
+    `is_qualified` is NOT a database column -- it is computed at the API
+    layer (see api/endpoints/leads.py's `_is_qualified` helper) from this
+    lead's already-persisted `score` and the requesting organization's
+    OrganizationQualificationSettings.qualification_threshold, exactly so
+    that changing the threshold changes this value immediately without
+    rewriting any Lead row or rerunning the AI pipeline (see
+    core/domain/models/qualification_settings.py). It intentionally does
+    NOT replace `qualification_label`: that field remains the legacy
+    80/60/40 score-band classification produced by the existing scoring
+    stage, unchanged by this field. The two can legitimately disagree
+    (e.g. `qualification_label="Cold Lead"` while `is_qualified=True` for
+    an organization with a low threshold) -- that is by design, not a bug.
+    """
+
+    is_qualified: bool
+
+
+class LeadDetail(LeadWithQualification):
     """Response schema for GET /api/v2/leads/{id} only (integration audit
-    items #3-#7). Purely additive on top of `Lead`: every existing field
-    and its type is unchanged, so this is backward-compatible for any
-    existing consumer of the plain `Lead` shape.
+    items #3-#7). Purely additive on top of `LeadWithQualification`: every
+    existing field and its type is unchanged, so this is backward-compatible
+    for any existing consumer of the plain `Lead` shape.
 
     `ai_insights` surfaces the AI outputs that were already being
     computed and persisted (to AIDecisionLog) but never reached this

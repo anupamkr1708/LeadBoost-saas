@@ -35,6 +35,7 @@ from core.domain.models.subscription import Plan
 from core.domain.models.billing import Subscription, UsageRecord, Invoice, DailyLeadQuotaUsage
 from core.domain.models.pipeline_lock import ActivePipelineLock
 from core.domain.models.job import Job
+from core.domain.models.qualification_settings import OrganizationQualificationSettings
 
 __all__ = [
     "Organization",
@@ -51,4 +52,5 @@ __all__ = [
     "DailyLeadQuotaUsage",
     "ActivePipelineLock",
     "Job",
+    "OrganizationQualificationSettings",
 ]
