@@ -44,6 +44,12 @@ _RECOMMENDED_VARS: List[Tuple[str, str]] = [
     ("GROQ_API_KEY", "AI-powered enrichment, qualification, and outreach generation"),
     ("SERPER_API_KEY", "website-resolution fallback and the startup/SaaS discovery fallback"),
     ("STRIPE_SECRET_KEY", "future billing integration (not active yet -- see PART 10)"),
+    (
+        "EMAIL_CREDENTIAL_ENCRYPTION_KEY",
+        "encrypting/decrypting email account credentials (P1.3) -- without it, "
+        "creating or verifying an email account fails with a clear error rather "
+        "than falling back to plaintext storage",
+    ),
 ]
 
 

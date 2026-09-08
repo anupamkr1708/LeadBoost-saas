@@ -52,3 +52,7 @@ class Organization(Base):
     qualification_settings = relationship(
         "OrganizationQualificationSettings", back_populates="organization", uselist=False
     )
+    # P1.3: an organization's sender mailboxes (see
+    # core/domain/models/email_account.py). One-to-many, unlike
+    # qualification_settings/subscription above.
+    email_accounts = relationship("EmailAccount", back_populates="organization")
