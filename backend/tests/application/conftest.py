@@ -11,10 +11,17 @@ import sys
 import uuid
 
 import pytest
+from cryptography.fernet import Fernet
 
 os.environ.setdefault("DATABASE_URL", f"sqlite:///./test_application_{uuid.uuid4().hex}.db")
 os.environ.setdefault("ENVIRONMENT", "development")
 os.environ.setdefault("SECRET_KEY", "test-secret-key")
+# P1.3: a real (test-only) Fernet key, so any test creating/updating/
+# verifying an EmailAccount has working encryption by default without
+# each test needing its own monkeypatch -- same rationale as SECRET_KEY
+# above. Generated once per test session, never a production value, never
+# used outside this test-only environment.
+os.environ.setdefault("EMAIL_CREDENTIAL_ENCRYPTION_KEY", Fernet.generate_key().decode())
 os.environ.setdefault("GROQ_API_KEY", "")  # force deterministic/heuristic agent paths
 os.environ.setdefault("CAN_USE_AI_FREE", "true")
 os.environ.setdefault("CAN_USE_AI_PRO", "true")

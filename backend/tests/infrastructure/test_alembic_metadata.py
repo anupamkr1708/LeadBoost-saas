@@ -7,7 +7,7 @@ tests that actually run `alembic upgrade`/`stamp`/`check` against real
 PostgreSQL databases.
 
 The central thing under test: alembic/env.py's target_metadata must see
-ALL 19 current ORM tables, not just the 15 registered through
+ALL 20 current ORM tables, not just the 16 registered through
 core.domain.models. application/observability/models.py defines 4 more
 tables using the same Base, but outside that central registry -- today
 those 4 only get registered because main.py happens to import the
@@ -41,6 +41,9 @@ _CORE_REGISTRY_TABLES = {
     # core/domain/models/qualification_settings.py). Registered through
     # core.domain.models like every other table in this set.
     "organization_qualification_settings",
+    # P1.3: organization-scoped sender mailboxes (see
+    # core/domain/models/email_account.py).
+    "email_accounts",
 }
 _OBSERVABILITY_TABLES = {
     "pipeline_execution_logs", "evaluation_report_logs",
@@ -83,7 +86,7 @@ def test_core_registry_is_structurally_separate_from_observability_models():
     )
 
 
-def test_target_metadata_contains_all_19_tables():
+def test_target_metadata_contains_all_20_tables():
     """The actual regression test: with BOTH imports env.py performs, every
     currently-known table must be present in target_metadata."""
     metadata = _import_target_metadata()
@@ -99,7 +102,7 @@ def test_target_metadata_contains_all_19_tables():
         f"table: {sorted(unexpected)}"
     )
 
-    assert len(tables) == 19
+    assert len(tables) == 20
 
 
 def test_observability_tables_specifically_visible():
