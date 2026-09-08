@@ -17,6 +17,7 @@ import {
   useQualificationSettings,
   useUpdateQualificationSettings,
 } from "@/features/organizations/hooks";
+import { EmailAccountsCard } from "@/components/organization/email-accounts-card";
 import { orgEditSchema, type OrgEditValues, qualificationSettingsSchema, type QualificationSettingsValues } from "@/lib/validation";
 import { formatDate } from "@/lib/utils";
 
@@ -170,6 +171,8 @@ export default function OrganizationPage() {
           )}
         </CardContent>
       </Card>
+
+      {org && <EmailAccountsCard orgId={org.id} />}
 
       <Card>
         <CardHeader>

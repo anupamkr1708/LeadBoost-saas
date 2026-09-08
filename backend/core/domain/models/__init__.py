@@ -36,6 +36,7 @@ from core.domain.models.billing import Subscription, UsageRecord, Invoice, Daily
 from core.domain.models.pipeline_lock import ActivePipelineLock
 from core.domain.models.job import Job
 from core.domain.models.qualification_settings import OrganizationQualificationSettings
+from core.domain.models.email_account import EmailAccount
 
 __all__ = [
     "Organization",
@@ -53,4 +54,5 @@ __all__ = [
     "ActivePipelineLock",
     "Job",
     "OrganizationQualificationSettings",
+    "EmailAccount",
 ]

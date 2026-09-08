@@ -62,7 +62,13 @@ _ALL_TABLES_AFTER_P1_2 = {
     "organization_qualification_settings",
 }
 
+_ALL_TABLES_AFTER_P1_3 = _ALL_TABLES_AFTER_P1_2 | {
+    # P1.3 (see core/domain/models/email_account.py)
+    "email_accounts",
+}
+
 _P1_2_REVISION = "61258798a87a"
+_P1_3_REVISION = "1e7ab6ba0976"
 
 
 def _database_url_with_name(admin_url: str, db_name: str) -> str:
@@ -158,7 +164,7 @@ class TestFreshPostgresUpgrade:
         engine = create_engine(disposable_db)
         inspector = inspect(engine)
         live_tables = set(inspector.get_table_names()) - {"alembic_version"}
-        assert live_tables == _ALL_TABLES_AFTER_P1_2
+        assert live_tables == _ALL_TABLES_AFTER_P1_3
 
     def test_upgrade_head_is_idempotent(self, disposable_db):
         first = _run_alembic("upgrade", "head", database_url=disposable_db)
@@ -174,10 +180,10 @@ class TestFreshPostgresUpgrade:
         _run_alembic("upgrade", "head", database_url=disposable_db)
 
         current = _run_alembic("current", database_url=disposable_db)
-        assert _P1_2_REVISION in current.stdout
+        assert _P1_3_REVISION in current.stdout
 
         heads = _run_alembic("heads", database_url=disposable_db)
-        assert _P1_2_REVISION in heads.stdout
+        assert _P1_3_REVISION in heads.stdout
         assert heads.stdout.strip().count("\n") == 0  # exactly one head line
 
     def test_alembic_check_clean_after_fresh_upgrade(self, disposable_db):
@@ -240,20 +246,21 @@ class TestExistingSchemaAdoption:
 
         # verify_baseline_schema.py compares the live DB against whatever
         # db.Base.metadata currently is (see that script's docstring) --
-        # which, now that P1.2 exists on top of the P1.1 baseline, is the
-        # schema at HEAD, not literally the baseline revision alone. A
-        # database built by _create_all_via_orm() (today's models) must
-        # therefore be stamped at "head", the revision whose cumulative
-        # effect actually matches it -- stamping it at the P1.1 baseline
-        # revision here would be asserting something false (that this DB
-        # matches a schema one migration behind what it actually has),
-        # and the upgrade below would then try to (re)create P1.2's table/
-        # columns and fail against objects that already exist.
+        # which, now that P1.2 and P1.3 exist on top of the P1.1 baseline,
+        # is the schema at HEAD, not literally the baseline revision
+        # alone. A database built by _create_all_via_orm() (today's
+        # models) must therefore be stamped at "head", the revision whose
+        # cumulative effect actually matches it -- stamping it at an
+        # earlier revision here would be asserting something false (that
+        # this DB matches a schema one or more migrations behind what it
+        # actually has), and the upgrade below would then try to
+        # (re)create a later migration's table/columns and fail against
+        # objects that already exist.
         stamp_result = _run_alembic("stamp", "head", database_url=disposable_db)
         assert stamp_result.returncode == 0, stamp_result.stderr
 
         current = _run_alembic("current", database_url=disposable_db)
-        assert _P1_2_REVISION in current.stdout
+        assert _P1_3_REVISION in current.stdout
 
         upgrade_result = _run_alembic("upgrade", "head", database_url=disposable_db)
         assert upgrade_result.returncode == 0
@@ -322,3 +329,26 @@ class TestBaselineMigrationSafety:
         assert "drop_constraint" not in upgrade_body
         assert upgrade_body.count("create_table") == 1
         assert upgrade_body.count("add_column") == 4
+
+    def test_p1_3_upgrade_body_has_no_drops(self):
+        """Same static check, for the P1.3 migration: additive-only (one
+        new table, no columns added to any existing table), no drops of
+        any kind."""
+        versions_dir = _BACKEND_ROOT / "alembic" / "versions"
+        p1_3_files = [f for f in versions_dir.glob("*.py") if _P1_3_REVISION in f.name]
+        assert len(p1_3_files) == 1
+        source = p1_3_files[0].read_text()
+
+        upgrade_start = source.index("def upgrade()")
+        downgrade_start = source.index("def downgrade()")
+        upgrade_body = source[upgrade_start:downgrade_start]
+
+        assert "drop_table" not in upgrade_body
+        assert "drop_column" not in upgrade_body
+        assert "drop_constraint" not in upgrade_body
+        assert upgrade_body.count("create_table") == 1
+        assert upgrade_body.count("add_column") == 0
+        assert "encrypted_credential" in upgrade_body  # sanity: the column exists
+        # Never a hardcoded secret/key in a migration file.
+        assert "EMAIL_CREDENTIAL_ENCRYPTION_KEY" not in source
+        assert "Fernet(" not in source

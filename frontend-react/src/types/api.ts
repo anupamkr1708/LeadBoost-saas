@@ -317,6 +317,77 @@ export interface QualificationSettingsUpdate {
   qualification_threshold?: number | null;
 }
 
+/**
+ * P1.3: organization-scoped sender mailbox.
+ * Provenance: GET/POST /api/v2/organizations/{org_id}/email-accounts,
+ * GET/PATCH/DELETE .../{account_id}, POST .../{account_id}/verify.
+ * Backend core/domain/schemas/email_account.py.
+ *
+ * SECURITY: this type has NO field that could ever carry a credential
+ * (no `credential`, `encrypted_credential`, `password`, or token field)
+ * -- the backend's response schema is deliberately shaped this way (see
+ * that schema's docstring), and this type mirrors it exactly. The only
+ * place a plaintext credential appears on the frontend is the write-only
+ * `credential` field on `EmailAccountCreatePayload`/
+ * `EmailAccountUpdatePayload` below, which is sent but never received.
+ */
+export type SecurityMode = "starttls" | "tls";
+export type CredentialType = "smtp_password" | "app_password" | "oauth_token";
+export type VerificationStatusValue = "unverified" | "verified" | "failed" | "requires_reauth" | "disabled";
+
+export interface EmailAccount {
+  id: number;
+  organization_id: number;
+  provider: string;
+  email_address: string;
+  display_name: string | null;
+  smtp_host: string;
+  smtp_port: number;
+  security_mode: SecurityMode;
+  username: string | null;
+  is_active: boolean;
+  credential_type: CredentialType;
+  verification_status: VerificationStatusValue;
+  verified_at: string | null;
+  verification_error_code: string | null;
+  created_at: string;
+  updated_at: string | null;
+}
+
+export interface EmailAccountCreatePayload {
+  provider?: string;
+  email_address: string;
+  display_name?: string | null;
+  smtp_host: string;
+  smtp_port: number;
+  security_mode?: SecurityMode;
+  username?: string | null;
+  credential_type?: CredentialType;
+  // Plaintext, write-only -- the one legitimate place this appears on
+  // the wire. Never populate this from a GET response.
+  credential?: string | null;
+}
+
+export interface EmailAccountUpdatePayload {
+  display_name?: string | null;
+  smtp_host?: string | null;
+  smtp_port?: number | null;
+  security_mode?: SecurityMode | null;
+  username?: string | null;
+  is_active?: boolean | null;
+  credential_type?: CredentialType | null;
+  // Omit entirely to preserve the existing credential unchanged; a real
+  // string replaces it and invalidates verification (backend re-derives
+  // verification_status -- see EmailAccount above).
+  credential?: string | null;
+}
+
+export interface EmailAccountVerifyResult {
+  verification_status: VerificationStatusValue;
+  verification_error_code: string | null;
+  verified_at: string | null;
+}
+
 // ---------- Billing ----------
 
 export interface PlanUsage {

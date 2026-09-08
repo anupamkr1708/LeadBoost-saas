@@ -14,13 +14,17 @@ from core.domain.models.qualification_settings import (
     OrganizationQualificationSettings,
     DEFAULT_QUALIFICATION_THRESHOLD,
 )
+from core.domain.models.email_account import EmailAccount, VerificationStatus
 from core.domain.schemas.user import UserCreate, UserUpdate, UserInDB
 from core.domain.schemas.organization import OrganizationCreate, OrganizationUpdate
 from core.domain.schemas.qualification_settings import QualificationSettingsUpdate
 from core.domain.schemas.lead import LeadCreate, LeadUpdate, LeadInDB
 from core.domain.schemas.api_key import APIKeyCreate, APIKeyInDB
+from core.domain.schemas.email_account import EmailAccountCreate, EmailAccountUpdate
+from core.infrastructure.security.credential_crypto import encrypt_credential
 from passlib.context import CryptContext
 import uuid
+from datetime import datetime, timezone
 
 # Password hashing context
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -509,3 +513,150 @@ def update_qualification_settings(
     db.commit()
     db.refresh(settings)
     return settings
+
+
+# Email Account CRUD operations (P1.3)
+#
+# SECURITY: these are the ONLY functions in the codebase that construct or
+# mutate EmailAccount.encrypted_credential. Every function below takes an
+# already-fetched, already organization-scope-checked `EmailAccount` ORM
+# instance where the caller (api/endpoints/email_accounts.py) is
+# responsible for the ownership check -- exactly like every other
+# organization-scoped resource in this file (see e.g. update_organization
+# above) -- and every *query* function filters by organization_id in the
+# SQL itself (WHERE organization_id = ...), never "fetch globally, check
+# in Python", per the P1.3 tenancy requirement.
+
+# Config fields whose change invalidates a previous verification result
+# (the connection this account was verified against no longer matches
+# what's stored) -- deliberately does NOT include display_name or
+# is_active, which are pure metadata/state changes that don't affect
+# whether the stored credential still authenticates against this host.
+_EMAIL_ACCOUNT_FIELDS_THAT_INVALIDATE_VERIFICATION = frozenset(
+    {"smtp_host", "smtp_port", "security_mode", "username", "credential_type"}
+)
+
+
+def _enum_value(value):
+    """EmailAccountCreate/Update fields like `security_mode` are Pydantic
+    enums (see core/domain/schemas/email_account.py); the ORM column is a
+    plain String. Unwraps `.value` when present, passes plain values
+    (str, bool, int, None) through unchanged."""
+    return value.value if hasattr(value, "value") else value
+
+
+def create_email_account(
+    db: Session, organization_id: int, payload: EmailAccountCreate
+) -> EmailAccount:
+    """Creates an EmailAccount for `organization_id`. If `payload.credential`
+    is supplied, it is encrypted here -- and only here -- before the ORM
+    object is ever constructed; the plaintext local variable
+    (`payload.credential`) goes out of scope when this function returns."""
+    encrypted_credential = None
+    if payload.credential:
+        encrypted_credential = encrypt_credential(payload.credential)
+
+    account = EmailAccount(
+        organization_id=organization_id,
+        provider=payload.provider,
+        email_address=payload.email_address,
+        display_name=payload.display_name,
+        smtp_host=payload.smtp_host,
+        smtp_port=payload.smtp_port,
+        security_mode=_enum_value(payload.security_mode),
+        # Defaults to the mailbox's own address -- see
+        # EmailAccountBase.username's docstring in the schema module.
+        username=payload.username or payload.email_address,
+        credential_type=_enum_value(payload.credential_type),
+        encrypted_credential=encrypted_credential,
+        verification_status=VerificationStatus.UNVERIFIED,
+    )
+    db.add(account)
+    db.commit()
+    db.refresh(account)
+    return account
+
+
+def get_email_account(db: Session, organization_id: int, account_id: int) -> Optional[EmailAccount]:
+    """Organization-scoped lookup -- the WHERE clause itself enforces
+    tenancy (see this section's module-level note); a row belonging to a
+    different organization simply doesn't match and this returns None,
+    which api/endpoints/email_accounts.py maps to 404 -- indistinguishable
+    from "doesn't exist", which is the correct behavior for a
+    cross-organization access attempt (never reveal that the id exists at
+    all)."""
+    return (
+        db.query(EmailAccount)
+        .filter(EmailAccount.id == account_id, EmailAccount.organization_id == organization_id)
+        .first()
+    )
+
+
+def get_email_accounts_by_organization(db: Session, organization_id: int) -> List[EmailAccount]:
+    return (
+        db.query(EmailAccount)
+        .filter(EmailAccount.organization_id == organization_id)
+        .order_by(EmailAccount.created_at.desc())
+        .all()
+    )
+
+
+def update_email_account(db: Session, account: EmailAccount, payload: EmailAccountUpdate) -> EmailAccount:
+    """`account` must already be the organization-scope-checked instance
+    from get_email_account -- this function does not re-check tenancy.
+
+    Only fields the client actually set are touched (exclude_unset), so a
+    request that only changes `display_name` never has to include, and
+    never overwrites, smtp_host/port/credential/etc. -- see the P1.3
+    brief's "do not require resubmitting credentials for unrelated
+    metadata changes"."""
+    data = payload.dict(exclude_unset=True)
+    new_credential = data.pop("credential", None)
+
+    invalidate_verification = False
+    for field, raw_value in data.items():
+        value = _enum_value(raw_value)
+        if field in _EMAIL_ACCOUNT_FIELDS_THAT_INVALIDATE_VERIFICATION and getattr(account, field) != value:
+            invalidate_verification = True
+        setattr(account, field, value)
+
+    if new_credential:
+        account.encrypted_credential = encrypt_credential(new_credential)
+        invalidate_verification = True
+
+    if invalidate_verification:
+        account.verification_status = VerificationStatus.UNVERIFIED
+        account.verified_at = None
+        account.verification_error_code = None
+
+    db.commit()
+    db.refresh(account)
+    return account
+
+
+def disable_email_account(db: Session, account: EmailAccount) -> EmailAccount:
+    """Soft delete -- same pattern as crud.delete_lead's `is_active = False`.
+    A hard DELETE is deliberately not offered: P1.4 outreach records will
+    need to keep referencing which mailbox a historical message was sent
+    from, and a hard delete would either orphan that foreign key or force
+    cascading deletes into send history, neither of which this phase
+    should decide on P1.4's behalf. Disabling also excludes the account
+    from P1.4's future sender-selection query without losing the row."""
+    account.is_active = False
+    db.commit()
+    db.refresh(account)
+    return account
+
+
+def record_email_account_verification(
+    db: Session, account: EmailAccount, status: str, error_code: Optional[str]
+) -> EmailAccount:
+    """Persists the outcome of core.infrastructure.email.smtp_verifier's
+    VerificationResult. Never touches encrypted_credential -- verification
+    reads the credential, it doesn't change it."""
+    account.verification_status = status
+    account.verification_error_code = error_code
+    account.verified_at = datetime.now(timezone.utc) if status == VerificationStatus.VERIFIED else account.verified_at
+    db.commit()
+    db.refresh(account)
+    return account

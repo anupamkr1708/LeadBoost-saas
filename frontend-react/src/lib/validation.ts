@@ -86,3 +86,25 @@ export const profileEditSchema = z.object({
   signature: z.string().nullable().optional(),
 });
 export type ProfileEditValues = z.infer<typeof profileEditSchema>;
+
+// P1.3: Email Account form. `credential` is intentionally NOT required
+// here even on create -- an account can be saved with connection
+// metadata only and have its credential added in a follow-up edit; the
+// backend enforces "no credential -> verification fails deterministically"
+// rather than this form enforcing "credential required to save".
+export const emailAccountFormSchema = z.object({
+  email_address: z.string().email("Enter a valid email address"),
+  display_name: z.string().nullable().optional(),
+  smtp_host: z.string().min(1, "SMTP host is required"),
+  smtp_port: z
+    .number({ invalid_type_error: "Enter a port number" })
+    .int()
+    .min(1, "Must be between 1 and 65535")
+    .max(65535, "Must be between 1 and 65535"),
+  security_mode: z.enum(["starttls", "tls"]),
+  username: z.string().nullable().optional(),
+  credential_type: z.enum(["smtp_password", "app_password"]),
+  // Write-only. Left blank on an edit -> existing credential preserved.
+  credential: z.string().nullable().optional(),
+});
+export type EmailAccountFormValues = z.infer<typeof emailAccountFormSchema>;
