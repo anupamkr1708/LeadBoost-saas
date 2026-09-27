@@ -5,6 +5,7 @@ CRUD operations for database models
 from typing import List, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
+from sqlalchemy.exc import IntegrityError
 from core.domain.models.user import User
 from core.domain.models.organization import Organization
 from core.domain.models.lead import Lead, LeadEnrichmentLog, ScrapingLog, AIDecisionLog
@@ -15,12 +16,15 @@ from core.domain.models.qualification_settings import (
     DEFAULT_QUALIFICATION_THRESHOLD,
 )
 from core.domain.models.email_account import EmailAccount, VerificationStatus
+from core.domain.models.outreach_action import OutreachAction, OutreachState
+from core.domain.models.outreach_policy import OrganizationOutreachPolicy
 from core.domain.schemas.user import UserCreate, UserUpdate, UserInDB
 from core.domain.schemas.organization import OrganizationCreate, OrganizationUpdate
 from core.domain.schemas.qualification_settings import QualificationSettingsUpdate
 from core.domain.schemas.lead import LeadCreate, LeadUpdate, LeadInDB
 from core.domain.schemas.api_key import APIKeyCreate, APIKeyInDB
 from core.domain.schemas.email_account import EmailAccountCreate, EmailAccountUpdate
+from core.domain.schemas.outreach_policy import OutreachPolicyUpdate
 from core.infrastructure.security.credential_crypto import encrypt_credential
 from passlib.context import CryptContext
 import uuid
@@ -660,3 +664,308 @@ def record_email_account_verification(
     db.commit()
     db.refresh(account)
     return account
+
+
+# Organization Outreach Policy CRUD operations (P1.4)
+#
+# Same "no plain getter that can return None" shape as
+# get_or_create_qualification_settings above, and for the identical
+# reason: every organization -- including every one that existed before
+# this table did -- must resolve to a well-defined (safest-default)
+# policy rather than every call site having to remember to handle a
+# missing row.
+def get_or_create_outreach_policy(db: Session, organization_id: int) -> OrganizationOutreachPolicy:
+    """Get an organization's outreach policy, creating a row with the
+    safest defaults (automatic sending disabled, approval required, not
+    paused, no limits configured) the first time it's read.
+
+    Safe under concurrent first use: `organization_id` is UNIQUE on this
+    table, so two concurrent requests for an organization that has never
+    had a policy row before can both reach the `policy is None` branch
+    and both attempt to INSERT. Exactly one INSERT succeeds; the other
+    raises IntegrityError, which is caught here the same way
+    create_outreach_action already handles the identical race on
+    (organization_id, idempotency_key) -- roll back the failed insert
+    and re-query for the row the other request just committed, rather
+    than letting the exception propagate as an unhandled 500."""
+    policy = (
+        db.query(OrganizationOutreachPolicy)
+        .filter(OrganizationOutreachPolicy.organization_id == organization_id)
+        .first()
+    )
+    if policy is None:
+        policy = OrganizationOutreachPolicy(organization_id=organization_id)
+        db.add(policy)
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            policy = (
+                db.query(OrganizationOutreachPolicy)
+                .filter(OrganizationOutreachPolicy.organization_id == organization_id)
+                .first()
+            )
+            if policy is None:
+                # Should be unreachable -- the IntegrityError means some
+                # request's row exists -- but never silently return None
+                # from a function whose whole contract is "always
+                # returns a policy".
+                raise
+            return policy
+        db.refresh(policy)
+    return policy
+
+
+def update_outreach_policy(
+    db: Session, organization_id: int, policy_update: OutreachPolicyUpdate
+) -> OrganizationOutreachPolicy:
+    """Update (creating first if necessary) an organization's outreach
+    policy. Field-level validation of the *merged* sending window
+    (both-or-neither, start != end) happens in
+    application/services/outreach_service.py, which calls this after
+    checking the merged result -- this function itself just persists
+    whatever it's given, matching update_qualification_settings above."""
+    policy = get_or_create_outreach_policy(db, organization_id)
+    for field, value in policy_update.dict(exclude_unset=True).items():
+        setattr(policy, field, value)
+    db.commit()
+    db.refresh(policy)
+    return policy
+
+
+# OutreachAction CRUD operations (P1.4)
+#
+# Every lookup is organization-scoped in the query itself (never
+# fetch-then-check only), matching the EmailAccount convention above --
+# see get_email_account's docstring for why this matters for tenancy.
+def create_outreach_action(db: Session, **fields) -> OutreachAction:
+    """Thin insert -- all validation (lead/sender ownership, sender
+    verification, message-readiness, idempotency, policy evaluation) has
+    already happened in application/services/outreach_service.py before
+    this is called. Raises sqlalchemy.exc.IntegrityError if
+    (organization_id, idempotency_key) already exists -- the service
+    layer catches this as a race with a concurrent identical request and
+    treats it exactly like an ordinary pre-existing-action result,
+    mirroring how core/domain/models/lead.py's uq_leads_org_website race
+    is already handled."""
+    action = OutreachAction(**fields)
+    db.add(action)
+    db.commit()
+    db.refresh(action)
+    return action
+
+
+def get_outreach_action(db: Session, organization_id: int, action_id: int) -> Optional[OutreachAction]:
+    return (
+        db.query(OutreachAction)
+        .filter(OutreachAction.id == action_id, OutreachAction.organization_id == organization_id)
+        .first()
+    )
+
+
+def get_outreach_action_by_idempotency_key(
+    db: Session, organization_id: int, idempotency_key: str
+) -> Optional[OutreachAction]:
+    return (
+        db.query(OutreachAction)
+        .filter(
+            OutreachAction.organization_id == organization_id,
+            OutreachAction.idempotency_key == idempotency_key,
+        )
+        .first()
+    )
+
+
+def list_outreach_actions(
+    db: Session,
+    organization_id: int,
+    *,
+    lead_id: Optional[int] = None,
+    state: Optional[str] = None,
+    limit: int = 100,
+) -> List[OutreachAction]:
+    query = db.query(OutreachAction).filter(OutreachAction.organization_id == organization_id)
+    if lead_id is not None:
+        query = query.filter(OutreachAction.lead_id == lead_id)
+    if state is not None:
+        query = query.filter(OutreachAction.state == state)
+    return query.order_by(OutreachAction.created_at.desc()).limit(limit).all()
+
+
+def count_outreach_actions_since(
+    db: Session, organization_id: int, *, states: List[str], since: datetime, mode: Optional[str] = None
+) -> int:
+    """Counts this organization's own OutreachAction rows in `states`
+    created at or after `since` -- the rolling send-limit check
+    (application/services/outreach_service.py) queries this directly
+    rather than maintaining a separate counters table, matching the
+    brief's "a simple database uniqueness/idempotency key is preferable
+    to a complex distributed architecture" philosophy applied to rate
+    limiting too: at this scale a COUNT(*) is the smallest correct
+    mechanism, not a new subsystem.
+
+    `mode`, when given, further restricts the count to that mode --
+    daily_send_limit/hourly_send_limit are documented (see
+    core/domain/models/outreach_policy.py) as gating AUTOMATIC-mode
+    authorization specifically, not an organization-wide cap across both
+    modes, so application/services/outreach_service.py's automatic-policy
+    evaluation always passes mode=OutreachMode.AUTOMATIC here -- a
+    manually-approved action must never consume an organization's
+    automatic-sending quota."""
+    query = db.query(OutreachAction).filter(
+        OutreachAction.organization_id == organization_id,
+        OutreachAction.state.in_(states),
+        OutreachAction.created_at >= since,
+    )
+    if mode is not None:
+        query = query.filter(OutreachAction.mode == mode)
+    return query.count()
+
+
+def claim_outreach_action_for_dispatch(db: Session, *, organization_id: int, action_id: int) -> int:
+    """THE atomic dispatch claim (see
+    core/domain/models/outreach_action.py::OutreachState's docstring and
+    application/services/outreach_service.py::dispatch_action's
+    "DISPATCH CLAIMING" note). A single UPDATE that both filters on and
+    changes `state` in one statement -- the database's own row-level
+    write serialization is what makes this safe under concurrency, not
+    application-level reasoning about who read what first.
+
+    Returns the number of rows updated: 1 means this call won the claim
+    and MUST proceed to actually contact the Mailing Agent; 0 means
+    either the action doesn't belong to this organization, doesn't
+    exist, or (the concurrent case this exists to prevent) another
+    request already claimed it first -- the caller must NOT contact the
+    Mailing Agent in that case.
+    """
+    return (
+        db.query(OutreachAction)
+        .filter(
+            OutreachAction.id == action_id,
+            OutreachAction.organization_id == organization_id,
+            OutreachAction.state.in_(OutreachState.DISPATCHABLE_FROM),
+        )
+        .update(
+            {
+                "state": OutreachState.DISPATCHING,
+                "dispatch_attempts": OutreachAction.dispatch_attempts + 1,
+            },
+            synchronize_session=False,
+        )
+    )
+
+
+def claim_outreach_action_for_approval(
+    db: Session, *, organization_id: int, action_id: int, approved_by_user_id: int, approved_at: datetime
+) -> int:
+    """Atomic approval claim -- the same "UPDATE that both filters on and
+    changes state in one statement" idea as claim_outreach_action_for_dispatch
+    above, applied to PENDING_REVIEW -> APPROVED. Fixes a real race: the
+    previous implementation read the row, checked its state in Python,
+    then wrote it back -- which allowed a concurrent approve and cancel
+    (or two concurrent approvals) on the same PENDING_REVIEW row to both
+    believe they were operating on a still-pending action and have the
+    second write silently overwrite the first (last-write-wins
+    corruption). With this UPDATE's WHERE clause re-checking `state`
+    itself, only whichever request's statement actually executes first
+    can match a still-`pending_review` row; by the time the loser's
+    statement runs, the row's state has already changed underneath it,
+    so its WHERE clause matches nothing.
+
+    Returns the number of rows updated: 1 means this call won and the
+    action is now APPROVED; 0 means it was not (any longer, or ever) in
+    PENDING_REVIEW when this ran -- the caller must treat that as
+    INVALID_STATE_TRANSITION, not silently succeed.
+    """
+    return (
+        db.query(OutreachAction)
+        .filter(
+            OutreachAction.id == action_id,
+            OutreachAction.organization_id == organization_id,
+            OutreachAction.state == OutreachState.PENDING_REVIEW,
+        )
+        .update(
+            {
+                "state": OutreachState.APPROVED,
+                "approved_by_user_id": approved_by_user_id,
+                "approved_at": approved_at,
+            },
+            synchronize_session=False,
+        )
+    )
+
+
+def claim_outreach_action_for_cancellation(
+    db: Session, *, organization_id: int, action_id: int, cancelled_at: datetime, reason: Optional[str] = None
+) -> int:
+    """Atomic cancellation claim -- same idea as
+    claim_outreach_action_for_approval above, for
+    OutreachState.CANCELLABLE_FROM -> CANCELLED. This is what makes
+    "concurrent approve + cancel" and "concurrent dispatch-claim +
+    cancel" both resolve to exactly one winner instead of a race:
+    DISPATCHING is not in CANCELLABLE_FROM, so once a dispatch attempt
+    has claimed the row (see claim_outreach_action_for_dispatch above),
+    this UPDATE's WHERE clause simply won't match it any more -- there is
+    no window where a cancel request can silently undo an in-flight
+    dispatch, because the two claims are racing for the same single
+    `state` column via the same atomic-UPDATE mechanism, not via
+    separate read-then-write steps that could interleave.
+
+    Returns the number of rows updated: 1 means this call won and the
+    action is now CANCELLED; 0 means it was not in a cancellable state
+    when this ran.
+    """
+    values = {"state": OutreachState.CANCELLED, "cancelled_at": cancelled_at}
+    if reason:
+        values["reason"] = reason
+    return (
+        db.query(OutreachAction)
+        .filter(
+            OutreachAction.id == action_id,
+            OutreachAction.organization_id == organization_id,
+            OutreachAction.state.in_(OutreachState.CANCELLABLE_FROM),
+        )
+        .update(values, synchronize_session=False)
+    )
+
+
+def lock_outreach_policy(db: Session, organization_id: int) -> OrganizationOutreachPolicy:
+    """Acquires a write-lock on this organization's outreach policy row,
+    held for the remainder of the caller's current transaction (until
+    the next db.commit(), or until db.rollback()/session-close on an
+    early-exit error path). Used ONLY by
+    application/services/outreach_service.py::create_action's
+    AUTOMATIC-mode quota-decision branch, to serialize "count this
+    organization's existing actions, then decide, then insert" against a
+    concurrent AUTOMATIC-mode create request for the same organization --
+    see that function's docstring for the exact race this closes (two
+    concurrent requests both observing the same not-yet-incremented
+    count and both passing a daily/hourly limit check that should only
+    have let one of them through).
+
+    Implemented as a real (if trivial) UPDATE rather than
+    `SELECT ... FOR UPDATE`: SQLite -- used throughout this project's
+    test suite -- has no row-level FOR UPDATE support at all, so relying
+    on it here would mean the serialization this function exists for
+    could never actually be exercised by a test, only hoped to work once
+    deployed to PostgreSQL. A real UPDATE takes an actual write lock on
+    both SQLite (serializing at the whole-database-file level -- a
+    stricter guarantee than strictly required, but a correct one for a
+    single-row critical section like this) and PostgreSQL (a real
+    per-row lock, exactly what production needs) -- the same code path
+    is what is tested here and what ships.
+
+    Creates the row first (with the safest defaults) if it doesn't exist
+    yet, exactly like get_or_create_outreach_policy -- a lock on a
+    nonexistent row is meaningless. Callers on the fast "automatic
+    sending isn't even enabled for this organization" rejection path
+    should keep using plain get_or_create_outreach_policy instead of
+    this function: holding a row lock is not free, and unnecessary once
+    no quota decision remains to be raced.
+    """
+    policy = get_or_create_outreach_policy(db, organization_id)
+    db.query(OrganizationOutreachPolicy).filter(OrganizationOutreachPolicy.id == policy.id).update(
+        {"updated_at": datetime.now(timezone.utc)}, synchronize_session=False
+    )
+    db.refresh(policy)
+    return policy

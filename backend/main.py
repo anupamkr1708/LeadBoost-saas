@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 import time
 
 from core.infrastructure.database import init_db, get_db
-from api.endpoints import leads, auth, organizations, billing, analytics, discovery, email_accounts
+from api.endpoints import leads, auth, organizations, billing, analytics, discovery, email_accounts, outreach
 from core.infrastructure.logging import setup_logging
 from core.observability import prometheus_metrics
 
@@ -218,6 +218,8 @@ app.include_router(auth.router, prefix="/api/v2", tags=["auth"])
 app.include_router(leads.router, prefix="/api/v2", tags=["leads"])
 app.include_router(organizations.router, prefix="/api/v2", tags=["organizations"])
 app.include_router(email_accounts.router, prefix="/api/v2", tags=["email-accounts"])
+app.include_router(outreach.router, prefix="/api/v2", tags=["outreach"])
+app.include_router(outreach.policy_router, prefix="/api/v2", tags=["outreach"])
 app.include_router(billing.router, prefix="/api/v2", tags=["billing"])
 app.include_router(analytics.router, prefix="/api/v2", tags=["analytics"])
 app.include_router(discovery.router, prefix="/api/v2", tags=["discovery"])

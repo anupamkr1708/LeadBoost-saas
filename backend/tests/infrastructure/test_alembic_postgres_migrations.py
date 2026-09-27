@@ -67,8 +67,16 @@ _ALL_TABLES_AFTER_P1_3 = _ALL_TABLES_AFTER_P1_2 | {
     "email_accounts",
 }
 
+_ALL_TABLES_AFTER_P1_4 = _ALL_TABLES_AFTER_P1_3 | {
+    # P1.4 (see core/domain/models/outreach_action.py and
+    # core/domain/models/outreach_policy.py)
+    "outreach_actions",
+    "organization_outreach_policies",
+}
+
 _P1_2_REVISION = "61258798a87a"
 _P1_3_REVISION = "1e7ab6ba0976"
+_P1_4_REVISION = "baee12037c73"
 
 
 def _database_url_with_name(admin_url: str, db_name: str) -> str:
@@ -164,7 +172,7 @@ class TestFreshPostgresUpgrade:
         engine = create_engine(disposable_db)
         inspector = inspect(engine)
         live_tables = set(inspector.get_table_names()) - {"alembic_version"}
-        assert live_tables == _ALL_TABLES_AFTER_P1_3
+        assert live_tables == _ALL_TABLES_AFTER_P1_4
 
     def test_upgrade_head_is_idempotent(self, disposable_db):
         first = _run_alembic("upgrade", "head", database_url=disposable_db)
@@ -180,10 +188,10 @@ class TestFreshPostgresUpgrade:
         _run_alembic("upgrade", "head", database_url=disposable_db)
 
         current = _run_alembic("current", database_url=disposable_db)
-        assert _P1_3_REVISION in current.stdout
+        assert _P1_4_REVISION in current.stdout
 
         heads = _run_alembic("heads", database_url=disposable_db)
-        assert _P1_3_REVISION in heads.stdout
+        assert _P1_4_REVISION in heads.stdout
         assert heads.stdout.strip().count("\n") == 0  # exactly one head line
 
     def test_alembic_check_clean_after_fresh_upgrade(self, disposable_db):
@@ -260,7 +268,7 @@ class TestExistingSchemaAdoption:
         assert stamp_result.returncode == 0, stamp_result.stderr
 
         current = _run_alembic("current", database_url=disposable_db)
-        assert _P1_3_REVISION in current.stdout
+        assert _P1_4_REVISION in current.stdout
 
         upgrade_result = _run_alembic("upgrade", "head", database_url=disposable_db)
         assert upgrade_result.returncode == 0
@@ -350,5 +358,50 @@ class TestBaselineMigrationSafety:
         assert upgrade_body.count("add_column") == 0
         assert "encrypted_credential" in upgrade_body  # sanity: the column exists
         # Never a hardcoded secret/key in a migration file.
+        assert "EMAIL_CREDENTIAL_ENCRYPTION_KEY" not in source
+        assert "Fernet(" not in source
+
+    def test_p1_4_upgrade_body_has_no_drops(self):
+        """Same static check, for the P1.4 migration: additive-only (two
+        new tables -- outreach_actions and organization_outreach_policies
+        -- no columns added to any existing table), no drops of any
+        kind, and no credential-shaped column declaration or hardcoded
+        secret anywhere in it (see core/domain/models/outreach_action.py's
+        module docstring for why that table has no such column at all).
+        Deliberately does NOT assert the bare word "credential" is absent
+        from the file -- this migration's own module docstring legitimately
+        discusses, in prose, why the new tables carry no credential column,
+        so that word's mere presence is expected and correct; what's
+        actually checked below is the absence of a real credential-shaped
+        column declaration or secret."""
+        versions_dir = _BACKEND_ROOT / "alembic" / "versions"
+        p1_4_files = [f for f in versions_dir.glob("*.py") if _P1_4_REVISION in f.name]
+        assert len(p1_4_files) == 1
+        source = p1_4_files[0].read_text()
+
+        upgrade_start = source.index("def upgrade()")
+        downgrade_start = source.index("def downgrade()")
+        upgrade_body = source[upgrade_start:downgrade_start]
+
+        assert "drop_table" not in upgrade_body
+        assert "drop_column" not in upgrade_body
+        assert "drop_constraint" not in upgrade_body
+        assert upgrade_body.count("create_table") == 2
+        assert upgrade_body.count("add_column") == 0
+        assert "outreach_actions" in upgrade_body
+        assert "organization_outreach_policies" in upgrade_body
+        assert "uq_outreach_actions_org_idempotency_key" in upgrade_body  # sanity: idempotency guarantee exists
+        # Precise checks for actual credential-bearing schema fields and
+        # secrets -- NOT a bare `"credential" not in source.lower()`,
+        # which would be self-contradictory: this migration's own module
+        # docstring legitimately discusses, in prose, why the new tables
+        # have no credential column (see core/domain/models/outreach_action.py's
+        # docstring for the same discussion) -- the word itself appearing
+        # in documentation is expected and correct, not a leak. What must
+        # never appear is an actual credential-shaped column declaration,
+        # a real encryption key, or key-construction code.
+        assert "encrypted_credential" not in upgrade_body
+        assert "plaintext_credential" not in upgrade_body
+        assert "sa.Column('credential'" not in upgrade_body
         assert "EMAIL_CREDENTIAL_ENCRYPTION_KEY" not in source
         assert "Fernet(" not in source
