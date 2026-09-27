@@ -37,6 +37,8 @@ from core.domain.models.pipeline_lock import ActivePipelineLock
 from core.domain.models.job import Job
 from core.domain.models.qualification_settings import OrganizationQualificationSettings
 from core.domain.models.email_account import EmailAccount
+from core.domain.models.outreach_action import OutreachAction
+from core.domain.models.outreach_policy import OrganizationOutreachPolicy
 
 __all__ = [
     "Organization",
@@ -55,4 +57,6 @@ __all__ = [
     "Job",
     "OrganizationQualificationSettings",
     "EmailAccount",
+    "OutreachAction",
+    "OrganizationOutreachPolicy",
 ]

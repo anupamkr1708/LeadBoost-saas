@@ -388,6 +388,83 @@ export interface EmailAccountVerifyResult {
   verified_at: string | null;
 }
 
+// ---------- Outreach (P1.4) ----------
+//
+// Provenance: api/endpoints/outreach.py / application/services/outreach_service.py.
+// SECURITY: OutreachAction never carries a credential — it only ever
+// references its sender by `email_account_id`, never the EmailAccount
+// object itself (see core/domain/schemas/outreach_action.py).
+
+export type OutreachMode = "manual" | "automatic";
+
+// "dispatching" is a transient, machine-only claim state (see backend
+// core/domain/models/outreach_action.py::OutreachState) — a client will
+// only ever observe it via a concurrent GET while another request's
+// dispatch is in flight, never as the result of its own POST
+// .../dispatch call.
+export type OutreachStateValue =
+  | "pending_review"
+  | "approved"
+  | "dispatching"
+  | "submitted"
+  | "dispatch_failed"
+  | "cancelled";
+
+export interface OutreachAction {
+  id: number;
+  organization_id: number;
+  lead_id: number;
+  email_account_id: number;
+  mode: OutreachMode;
+  state: OutreachStateValue;
+  recipient_email: string;
+  recipient_name: string | null;
+  subject: string | null;
+  body: string;
+  correlation_id: string | null;
+  idempotency_key: string;
+  reason: string | null;
+  approved_by_user_id: number | null;
+  approved_at: string | null;
+  submitted_at: string | null;
+  cancelled_at: string | null;
+  mailing_agent_reference: string | null;
+  dispatch_attempts: number;
+  last_dispatch_error: string | null;
+  created_at: string;
+  updated_at: string | null;
+}
+
+export interface OutreachActionCreatePayload {
+  lead_id: number;
+  email_account_id: number;
+  mode?: OutreachMode;
+  idempotency_key?: string;
+}
+
+export interface OutreachPolicy {
+  organization_id: number;
+  automatic_sending_enabled: boolean;
+  require_approval_for_automatic: boolean;
+  daily_send_limit: number | null;
+  hourly_send_limit: number | null;
+  sending_window_start_hour_utc: number | null;
+  sending_window_end_hour_utc: number | null;
+  is_paused: boolean;
+  created_at: string;
+  updated_at: string | null;
+}
+
+export interface OutreachPolicyUpdatePayload {
+  automatic_sending_enabled?: boolean;
+  require_approval_for_automatic?: boolean;
+  daily_send_limit?: number | null;
+  hourly_send_limit?: number | null;
+  sending_window_start_hour_utc?: number | null;
+  sending_window_end_hour_utc?: number | null;
+  is_paused?: boolean;
+}
+
 // ---------- Billing ----------
 
 export interface PlanUsage {
@@ -462,4 +539,9 @@ export interface ApiErrorShape {
   status: number | null;
   message: string;
   fieldErrors?: Record<string, string>;
+  /** Present only for the P1.4 outreach endpoints' structured error body
+   * ({error_code, message} -- see api/endpoints/outreach.py's
+   * _ERROR_STATUS mapping). Every other endpoint's `detail` is a plain
+   * string, so this is undefined for them. */
+  errorCode?: string;
 }

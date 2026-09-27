@@ -99,6 +99,16 @@ export function normalizeApiError(error: unknown): ApiErrorShape {
       return { status, message: (data as { detail: string }).detail };
     }
 
+    // P1.4 outreach endpoints raise a structured {error_code, message}
+    // detail body instead of a plain string (see
+    // api/endpoints/outreach.py) so the UI can branch on error_code when
+    // useful, while every other consumer can still just read `.message`
+    // the same way as any other endpoint's error.
+    const outreachDetail = (data as { detail?: { error_code?: string; message?: string } })?.detail;
+    if (outreachDetail && typeof outreachDetail === "object" && typeof outreachDetail.message === "string") {
+      return { status, message: outreachDetail.message, errorCode: outreachDetail.error_code };
+    }
+
     // The 402 payments-not-live response (POST /upgrade) is a plain
     // JSONResponse, not an HTTPException -- its body is
     // {"message": ..., "activated": false, "requested_plan": ...}, with
