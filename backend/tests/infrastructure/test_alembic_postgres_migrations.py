@@ -35,6 +35,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.exc import IntegrityError
 
 _BACKEND_ROOT = Path(__file__).resolve().parent.parent.parent
 _ADMIN_URL = os.environ.get("ALEMBIC_TEST_DATABASE_URL")
@@ -77,6 +78,7 @@ _ALL_TABLES_AFTER_P1_4 = _ALL_TABLES_AFTER_P1_3 | {
 _P1_2_REVISION = "61258798a87a"
 _P1_3_REVISION = "1e7ab6ba0976"
 _P1_4_REVISION = "baee12037c73"
+_L1_REVISION = "c1a7e0d2b9f4"  # current head: email_accounts <-> Mailer mailbox link
 
 
 def _database_url_with_name(admin_url: str, db_name: str) -> str:
@@ -188,10 +190,10 @@ class TestFreshPostgresUpgrade:
         _run_alembic("upgrade", "head", database_url=disposable_db)
 
         current = _run_alembic("current", database_url=disposable_db)
-        assert _P1_4_REVISION in current.stdout
+        assert _L1_REVISION in current.stdout
 
         heads = _run_alembic("heads", database_url=disposable_db)
-        assert _P1_4_REVISION in heads.stdout
+        assert _L1_REVISION in heads.stdout
         assert heads.stdout.strip().count("\n") == 0  # exactly one head line
 
     def test_alembic_check_clean_after_fresh_upgrade(self, disposable_db):
@@ -268,7 +270,7 @@ class TestExistingSchemaAdoption:
         assert stamp_result.returncode == 0, stamp_result.stderr
 
         current = _run_alembic("current", database_url=disposable_db)
-        assert _P1_4_REVISION in current.stdout
+        assert _L1_REVISION in current.stdout
 
         upgrade_result = _run_alembic("upgrade", "head", database_url=disposable_db)
         assert upgrade_result.returncode == 0
@@ -405,3 +407,70 @@ class TestBaselineMigrationSafety:
         assert "sa.Column('credential'" not in upgrade_body
         assert "EMAIL_CREDENTIAL_ENCRYPTION_KEY" not in source
         assert "Fernet(" not in source
+
+
+class TestL1MailerMailboxLinkMigration:
+    """L1 is additive on email_accounts: existing rows survive, start 'pending'
+    (so nothing is integrated-send-ready until reconciled with the Mailer), and
+    the mailbox ref is unique."""
+
+    def _q(self, url, sql):
+        eng = create_engine(url)
+        try:
+            with eng.begin() as c:
+                res = c.execute(text(sql))
+                return res.fetchall() if res.returns_rows else []
+        finally:
+            eng.dispose()
+
+    def test_existing_rows_survive_and_default_to_pending(self, disposable_db):
+        assert _run_alembic("upgrade", _P1_4_REVISION, database_url=disposable_db).returncode == 0
+        self._q(disposable_db, "INSERT INTO organizations (name) VALUES ('Acme')")
+        self._q(
+            disposable_db,
+            "INSERT INTO email_accounts (organization_id, provider, email_address, smtp_host, smtp_port,"
+            " security_mode, is_active, credential_type, verification_status)"
+            " VALUES (1, 'smtp', 'a@acme.test', 'smtp.acme.test', 587, 'starttls', true, 'smtp_password', 'verified')",
+        )
+        up = _run_alembic("upgrade", "head", database_url=disposable_db)
+        assert up.returncode == 0, up.stderr
+
+        rows = self._q(
+            disposable_db,
+            "SELECT email_address, verification_status, mailer_mailbox_ref, mailer_sync_state,"
+            " mailer_sync_error_code FROM email_accounts",
+        )
+        assert rows == [("a@acme.test", "verified", None, "pending", None)]
+
+    def test_mailbox_ref_is_unique_but_nulls_repeat(self, disposable_db):
+        assert _run_alembic("upgrade", "head", database_url=disposable_db).returncode == 0
+        self._q(disposable_db, "INSERT INTO organizations (name) VALUES ('Acme')")
+        ins = (
+            "INSERT INTO email_accounts (organization_id, provider, email_address, smtp_host, smtp_port,"
+            " security_mode, is_active, credential_type, verification_status, mailer_mailbox_ref)"
+            " VALUES (1, 'smtp', '{e}', 'h', 587, 'starttls', true, 'smtp_password', 'unverified', {r})"
+        )
+        self._q(disposable_db, ins.format(e="a@x.test", r="NULL"))
+        self._q(disposable_db, ins.format(e="b@x.test", r="NULL"))  # NULL != NULL
+        self._q(disposable_db, ins.format(e="c@x.test", r="'ref1'"))
+        with pytest.raises(IntegrityError, match="uq_email_accounts_mailer_mailbox_ref"):
+            self._q(disposable_db, ins.format(e="d@x.test", r="'ref1'"))
+
+    def test_downgrade_removes_only_the_l1_columns_and_keeps_rows(self, disposable_db):
+        assert _run_alembic("upgrade", "head", database_url=disposable_db).returncode == 0
+        self._q(disposable_db, "INSERT INTO organizations (name) VALUES ('Acme')")
+        self._q(
+            disposable_db,
+            "INSERT INTO email_accounts (organization_id, provider, email_address, smtp_host, smtp_port,"
+            " security_mode, is_active, credential_type, verification_status)"
+            " VALUES (1, 'smtp', 'a@acme.test', 'h', 587, 'starttls', true, 'smtp_password', 'verified')",
+        )
+        assert _run_alembic("downgrade", "-1", database_url=disposable_db).returncode == 0
+        cols = {r[0] for r in self._q(
+            disposable_db,
+            "SELECT column_name FROM information_schema.columns WHERE table_name='email_accounts'")}
+        assert not {c for c in cols if c.startswith("mailer_")}
+        assert "encrypted_credential" in cols and "verification_status" in cols
+        assert self._q(disposable_db, "SELECT count(*) FROM email_accounts") == [(1,)]
+        # and it can be re-applied
+        assert _run_alembic("upgrade", "head", database_url=disposable_db).returncode == 0
