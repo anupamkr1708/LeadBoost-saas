@@ -30,6 +30,7 @@ from sqlalchemy.orm import Session
 from typing import Any, List
 import time
 
+from application.services.mailer_mailbox_sync import sync_email_account, sync_fingerprint
 from core.infrastructure.database import get_db
 from core.infrastructure.auth.security import get_current_user
 from core.domain.models.user import User
@@ -79,6 +80,22 @@ def _get_owned_account_or_404(db: Session, org_id: int, account_id: int):
     if account is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Email account not found")
     return account
+
+
+async def _verify_result(db: Session, org_id: int, updated) -> EmailAccountVerifyResult:
+    """L1: every verification outcome can change whether the Mailer mailbox may be
+    ACTIVE (verified -> provision/activate; failed/disabled -> disable), so
+    reconcile it now and report the integrated-sending readiness alongside the
+    verification result. The reconcile never raises and never alters the
+    verification outcome that was just recorded."""
+    synced = await sync_email_account(db, org_id, updated.id) or updated
+    return EmailAccountVerifyResult(
+        verification_status=updated.verification_status,
+        verification_error_code=updated.verification_error_code,
+        verified_at=updated.verified_at,
+        mailer_sync_state=synced.mailer_sync_state,
+        mailer_sync_error_code=synced.mailer_sync_error_code,
+    )
 
 
 @router.get("/{org_id}/email-accounts", response_model=List[EmailAccountSchema])
@@ -147,14 +164,22 @@ async def update_email_account_endpoint(
     verification_status back to unverified."""
     _require_own_organization(current_user, org_id)
     account = _get_owned_account_or_404(db, org_id, account_id)
+    before = sync_fingerprint(account)
     try:
-        return update_email_account(db, account, payload)
+        updated = update_email_account(db, account, payload)
     except CredentialEncryptionError as exc:
         logger.error(f"Email account update failed: {exc}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Email account credentials cannot be processed right now. Please try again shortly.",
         )
+    # L1: a connection-sensitive change (which update_email_account has already
+    # turned into UNVERIFIED + mailer_sync_state='pending' in one commit) or an
+    # enable/disable toggle must reach the Mailer. A cosmetic edit (display_name)
+    # leaves the fingerprint unchanged and does not touch the Mailer.
+    if sync_fingerprint(updated) != before:
+        return await sync_email_account(db, org_id, account_id) or updated
+    return updated
 
 
 @router.delete("/{org_id}/email-accounts/{account_id}", response_model=EmailAccountSchema)
@@ -170,7 +195,31 @@ async def delete_email_account_endpoint(
     new state without a follow-up GET."""
     _require_own_organization(current_user, org_id)
     account = _get_owned_account_or_404(db, org_id, account_id)
-    return disable_email_account(db, account)
+    disabled = disable_email_account(db, account)
+    # L1: the Mailer mailbox must stop being sendable too. If the Mailer is
+    # unreachable the row stays 'pending' (retryable) and the dispatch gate
+    # already refuses new dispatches for an inactive account.
+    return await sync_email_account(db, org_id, account_id) or disabled
+
+
+@router.post("/{org_id}/email-accounts/{account_id}/mailer-sync", response_model=EmailAccountSchema)
+async def sync_email_account_with_mailer(
+    org_id: int,
+    account_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Any:
+    """L1: explicit, idempotent retry of the Mailer mailbox reconciliation (the
+    recovery path for a 'pending' account after a Mailer outage). Takes no body;
+    the desired state is derived from this account's current LeadBoost state and
+    the Mailer is told nothing else. Organization-scoped like every other route
+    here: another organization's account is a 404."""
+    _require_own_organization(current_user, org_id)
+    _get_owned_account_or_404(db, org_id, account_id)
+    synced = await sync_email_account(db, org_id, account_id)
+    if synced is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Email account not found")
+    return synced
 
 
 @router.post("/{org_id}/email-accounts/{account_id}/verify", response_model=EmailAccountVerifyResult)
@@ -184,9 +233,11 @@ async def verify_email_account(
     Never sends an email (see smtp_verifier.py). One bounded attempt, no
     retries.
 
-    The ONLY place in the API layer where a credential is ever decrypted.
-    `plaintext` lives only for the few lines between decrypt and the
-    verification call; it is never logged, never included in the
+    One of exactly two places a credential is ever decrypted (L1): here, for
+    LeadBoost's own SMTP verification, and in application/services/
+    mailer_mailbox_sync.py, immediately before a Mailer mailbox create/activate.
+    Ordinary outreach dispatch decrypts nothing. `plaintext` lives only for the
+    few lines between decrypt and the verification call; it is never logged, never included in the
     response (`EmailAccountVerifyResult` has no field for it), and goes
     out of scope as soon as this function returns.
     """
@@ -201,21 +252,13 @@ async def verify_email_account(
         updated = record_email_account_verification(
             db, account, status=VerificationStatus.DISABLED, error_code=None
         )
-        return EmailAccountVerifyResult(
-            verification_status=updated.verification_status,
-            verification_error_code=updated.verification_error_code,
-            verified_at=updated.verified_at,
-        )
+        return await _verify_result(db, org_id, updated)
 
     if not account.encrypted_credential:
         updated = record_email_account_verification(
             db, account, status=VerificationStatus.FAILED, error_code="no_credential_configured"
         )
-        return EmailAccountVerifyResult(
-            verification_status=updated.verification_status,
-            verification_error_code=updated.verification_error_code,
-            verified_at=updated.verified_at,
-        )
+        return await _verify_result(db, org_id, updated)
 
     try:
         plaintext = decrypt_credential(account.encrypted_credential)
@@ -224,11 +267,7 @@ async def verify_email_account(
         updated = record_email_account_verification(
             db, account, status=VerificationStatus.FAILED, error_code="credential_unreadable"
         )
-        return EmailAccountVerifyResult(
-            verification_status=updated.verification_status,
-            verification_error_code=updated.verification_error_code,
-            verified_at=updated.verified_at,
-        )
+        return await _verify_result(db, org_id, updated)
 
     started = time.monotonic()
     try:
@@ -259,8 +298,4 @@ async def verify_email_account(
     )
 
     updated = record_email_account_verification(db, account, status=result.status, error_code=result.error_code)
-    return EmailAccountVerifyResult(
-        verification_status=updated.verification_status,
-        verification_error_code=updated.verification_error_code,
-        verified_at=updated.verified_at,
-    )
+    return await _verify_result(db, org_id, updated)

@@ -115,6 +115,12 @@ class EmailAccount(BaseModel):
     verification_status: str
     verified_at: Optional[datetime] = None
     verification_error_code: Optional[str] = None
+    # L1: read-only. Whether the Mailer-owned mailbox mirrors this account
+    # ('pending' | 'synced') and, if the last attempt failed, a safe code.
+    # The Mailer mailbox reference is intentionally not part of this schema:
+    # it is opaque, server-set, and never client-visible or client-settable.
+    mailer_sync_state: str = "pending"
+    mailer_sync_error_code: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 
@@ -131,3 +137,7 @@ class EmailAccountVerifyResult(BaseModel):
     verification_status: str
     verification_error_code: Optional[str] = None
     verified_at: Optional[datetime] = None
+    # L1: a successful verification does not by itself make integrated sending
+    # available -- the Mailer mailbox must also have been provisioned.
+    mailer_sync_state: Optional[str] = None
+    mailer_sync_error_code: Optional[str] = None
