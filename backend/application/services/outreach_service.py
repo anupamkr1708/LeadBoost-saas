@@ -10,6 +10,19 @@ the existing api/endpoints/email_accounts.py <-> crud.py division: the
 API layer authenticates and translates OutreachError into HTTP responses,
 this module decides what is and isn't allowed.
 
+L1 HAND-OFF (what dispatch_action sends, and what it never does): dispatch
+no longer decrypts or forwards any SMTP credential and no longer sends a
+pre-written message. LeadBoost authorizes (this OutreachAction); the Mailer
+generates, grounds, stores and sends the Message through its own Mailbox
+(see core/infrastructure/mailing_agent/CONTRACT.md). Dispatch therefore sends
+only recipient + business context (application/services/outreach_context.py)
++ the stable idempotency key. OutreachAction.subject/body remain the
+legacy authorization snapshot; the authoritative DELIVERED text is the
+Mailer's Message. Before calling the Mailer, dispatch requires that the
+action's sender is the organization's single eligible account and that its
+Mailer mailbox is provisioned and in sync (application/services/
+mailer_mailbox_sync.py); otherwise it fails closed without a network call.
+
 STATE MACHINE (see core/domain/models/outreach_action.py::OutreachState):
 
     PENDING_REVIEW --approve_action--> APPROVED
@@ -102,14 +115,14 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from application.services.infra_adapters import get_recent_ai_decision_logs
-from core.domain.models.email_account import EmailAccount, VerificationStatus
+from application.services.outreach_context import build_recipient_facts, build_value_proposition
+from core.domain.models.email_account import EmailAccount, MailerSyncState, VerificationStatus
 from core.domain.models.lead import Lead
 from core.domain.models.outreach_action import OutreachAction, OutreachMode, OutreachState
 from core.domain.models.outreach_policy import OrganizationOutreachPolicy
 from core.infrastructure.database import crud
 from core.infrastructure.logging import get_logger
-from core.infrastructure.mailing_agent.client import dispatch_outreach_action as _call_mailing_agent
-from core.infrastructure.security.credential_crypto import decrypt_credential, CredentialEncryptionError
+from core.infrastructure.mailing_agent.client import submit_generated_outreach as _call_mailing_agent
 
 logger = get_logger(__name__)
 
@@ -130,6 +143,8 @@ class OutreachErrorCode:
     ACTION_NOT_FOUND = "action_not_found"
     INVALID_STATE_TRANSITION = "invalid_state_transition"
     IDEMPOTENCY_KEY_REUSED = "idempotency_key_reused"
+    # L1: more than one active+verified sender -> the integrated path refuses to guess.
+    MULTIPLE_ACTIVE_SENDERS = "multiple_active_senders"
 
 
 class OutreachError(Exception):
@@ -603,6 +618,18 @@ async def dispatch_action(db: Session, *, organization_id: int, action_id: int) 
             f"Cannot dispatch an action in state '{action.state}'.",
         )
 
+    # L1: the Mailer selects its organization's sole ACTIVE mailbox, so more than
+    # one eligible (active + verified) account here is a configuration conflict.
+    # Raised BEFORE the claim: the action stays APPROVED/DISPATCH_FAILED
+    # (retryable once the extra account is disabled), nothing is marked failed,
+    # and the Mailer is never contacted. (api maps this to HTTP 409.)
+    if crud.count_eligible_email_accounts(db, organization_id) > 1:
+        raise OutreachError(
+            OutreachErrorCode.MULTIPLE_ACTIVE_SENDERS,
+            "Multiple active email accounts are configured. "
+            "Exactly one mailbox must be active for integrated outreach.",
+        )
+
     # THE atomic claim. This single UPDATE both checks that the row is
     # still in an eligible source state AND moves it to DISPATCHING, as
     # one database statement -- see crud.claim_outreach_action_for_dispatch
@@ -640,43 +667,53 @@ async def dispatch_action(db: Session, *, organization_id: int, action_id: int) 
         db.refresh(action)
         return action
 
-    if not sender.encrypted_credential:
+    # L1: the Mailer owns the send-time credential, so the only thing LeadBoost
+    # checks is that ITS mailbox for this account exists and mirrors the
+    # account's current state. No credential is read, decrypted or forwarded here.
+    if not sender.mailer_mailbox_ref or sender.mailer_sync_state != MailerSyncState.SYNCED:
+        detail = f" ({sender.mailer_sync_error_code})" if sender.mailer_sync_error_code else ""
         action.state = OutreachState.DISPATCH_FAILED
-        action.last_dispatch_error = "Sender mailbox has no credential configured."
-        db.commit()
-        db.refresh(action)
-        return action
-
-    try:
-        plaintext = decrypt_credential(sender.encrypted_credential)
-    except CredentialEncryptionError:
-        action.state = OutreachState.DISPATCH_FAILED
-        action.last_dispatch_error = "Sender credential could not be decrypted."
-        db.commit()
-        db.refresh(action)
-        return action
-
-    try:
-        result = await _call_mailing_agent(
-            outreach_action_id=action.id,
-            organization_id=organization_id,
-            idempotency_key=action.idempotency_key,
-            correlation_id=action.correlation_id,
-            sender_email_address=sender.email_address,
-            sender_display_name=sender.display_name,
-            smtp_host=sender.smtp_host,
-            smtp_port=sender.smtp_port,
-            security_mode=sender.security_mode,
-            smtp_username=sender.username or sender.email_address,
-            credential_type=sender.credential_type,
-            plaintext_credential=plaintext,
-            recipient_email=action.recipient_email,
-            recipient_name=action.recipient_name,
-            subject=action.subject,
-            body=action.body,
+        action.last_dispatch_error = (
+            f"Sender mailbox is not synchronized with the Mailer{detail}. "
+            "Re-verify the account or retry synchronization."
         )
-    finally:
-        del plaintext  # never held longer than the one outbound call
+        db.commit()
+        db.refresh(action)
+        return action
+
+    organization = crud.get_organization(db, organization_id)
+    value_proposition = build_value_proposition(organization)
+    if not value_proposition:
+        action.state = OutreachState.DISPATCH_FAILED
+        action.last_dispatch_error = (
+            "value_proposition_not_configured: set the organization description "
+            "(\"What does your team do?\") before sending."
+        )
+        db.commit()
+        db.refresh(action)
+        return action
+
+    try:
+        lead = _get_owned_lead(db, organization_id, action.lead_id)
+    except OutreachError as exc:
+        action.state = OutreachState.DISPATCH_FAILED
+        action.last_dispatch_error = exc.message
+        db.commit()
+        db.refresh(action)
+        return action
+
+    result = await _call_mailing_agent(
+        organization_id=organization_id,
+        outreach_action_id=action.id,
+        idempotency_key=action.idempotency_key,
+        correlation_id=action.correlation_id,
+        recipient_email=action.recipient_email,
+        recipient_name=action.recipient_name or lead.contact_name,
+        recipient_title=lead.contact_title,
+        recipient_company=lead.company_name,
+        value_proposition=value_proposition,
+        recipient_facts=build_recipient_facts(lead),
+    )
 
     if result.accepted:
         action.state = OutreachState.SUBMITTED

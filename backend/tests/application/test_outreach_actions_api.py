@@ -43,7 +43,7 @@ from fastapi.testclient import TestClient
 import main
 from application.services import outreach_service
 from application.services.outreach_service import OutreachError
-from core.domain.models.email_account import EmailAccount, VerificationStatus
+from core.domain.models.email_account import EmailAccount, MailerSyncState, VerificationStatus
 from core.domain.models.lead import Lead
 from core.domain.models.outreach_action import OutreachState
 from core.infrastructure.database import SessionLocal, crud
@@ -75,7 +75,25 @@ def _register_and_login(client, email):
     assert r2.status_code == 200, r2.text
     token = r2.json()["access_token"]
     me = client.get("/api/v2/me", headers={"Authorization": f"Bearer {token}"}).json()
+    _complete_company_profile(me["organization_id"])
     return token, me["organization_id"], me["id"]
+
+
+ORG_OFFER = "We help B2B teams ship reliable developer tooling."
+
+
+def _complete_company_profile(organization_id):
+    """L1: the Mailer-generated path takes its value proposition from
+    Organization.description ("What does your team do?"); dispatch fails closed
+    without it. A real onboarded organization has filled this in."""
+    from core.domain.models.organization import Organization
+
+    s = SessionLocal()
+    try:
+        s.query(Organization).filter(Organization.id == organization_id).update({"description": ORG_OFFER})
+        s.commit()
+    finally:
+        s.close()
 
 
 def _auth(token):
@@ -117,6 +135,10 @@ def _make_sender(db_session, organization_id, *, verified=True, active=True, **o
         verification_status=VerificationStatus.VERIFIED if verified else VerificationStatus.UNVERIFIED,
         verified_at=datetime.now(timezone.utc) if verified else None,
     )
+    if verified and active:
+        # L1: a verified, active sender has been reconciled with the Mailer-owned
+        # mailbox. (Unverified/inactive ones have no mailbox, as in production.)
+        fields.update(mailer_mailbox_ref=f"mbx_{uuid.uuid4().hex[:12]}", mailer_sync_state=MailerSyncState.SYNCED)
     fields.update(overrides)
     account = EmailAccount(**fields)
     db_session.add(account)
@@ -587,14 +609,19 @@ class TestDispatch:
         _, kwargs = mock.await_args
         assert kwargs["outreach_action_id"] == action_id
         assert kwargs["idempotency_key"]  # the hard contract requirement -- never empty
-        assert kwargs["plaintext_credential"] == SENDER_SECRET
         assert kwargs["recipient_email"] == "lead@example.com"
-        assert kwargs["subject"]
-        assert kwargs["body"]
-        # Never the encrypted form -- the contract carries the decrypted
-        # secret at the moment of dispatch (see client.py's module
-        # docstring for why), never the ciphertext.
-        assert kwargs["plaintext_credential"] != encrypt_credential(SENDER_SECRET)
+        assert kwargs["recipient_name"] == "Jamie Lead"
+        assert kwargs["recipient_company"] == "Acme Co"
+        assert kwargs["value_proposition"] == ORG_OFFER
+        assert "Industry: Software" in kwargs["recipient_facts"]
+        # L1: the OLD contract's credential, SMTP settings and pre-written message
+        # are no longer passed at all -- the Mailer owns the send-time credential and
+        # generates the message. Not even the ciphertext is handed over.
+        assert not (set(kwargs) & {
+            "plaintext_credential", "credential_type", "smtp_host", "smtp_port", "security_mode",
+            "smtp_username", "sender_email_address", "sender_display_name", "subject", "body",
+        })
+        assert SENDER_SECRET not in repr(kwargs) and encrypt_credential(SENDER_SECRET) not in repr(kwargs)
 
     def test_dispatch_response_never_leaks_credential(self, client, db_session):
         token, action_id = self._approved_action(client, db_session, "5")
