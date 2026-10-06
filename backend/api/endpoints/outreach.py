@@ -59,6 +59,8 @@ _ERROR_STATUS = {
     OutreachErrorCode.AUTOMATIC_SENDING_DISABLED: status.HTTP_422_UNPROCESSABLE_ENTITY,
     OutreachErrorCode.INVALID_STATE_TRANSITION: status.HTTP_409_CONFLICT,
     OutreachErrorCode.IDEMPOTENCY_KEY_REUSED: status.HTTP_409_CONFLICT,
+    # L1: configuration conflict -- more than one eligible sender; never guessed.
+    OutreachErrorCode.MULTIPLE_ACTIVE_SENDERS: status.HTTP_409_CONFLICT,
 }
 
 

@@ -1,286 +1,331 @@
 """
-P1.4: tests for the Mailing Agent HTTP client itself --
-core/infrastructure/mailing_agent/client.py.
+L1: tests for the Mailer HTTP client -- core/infrastructure/mailing_agent/client.py.
 
-Under test, all fail-closed BEFORE any network call is attempted unless
-otherwise noted:
+Real httpx request objects flow through an httpx.MockTransport, so these assert
+the ACTUAL bytes that would go on the wire (method, path, headers, JSON body),
+not a mock's call arguments. No network is touched.
 
-1. Transport security (_is_secure_transport / DispatchErrorCode.INSECURE_TRANSPORT)
-   -- a remote http:// destination must never be used to carry a
-   plaintext SMTP credential; only https:// or a handful of local
-   loopback hosts over http:// are accepted.
-
-2. The idempotency-key hard requirement (DispatchErrorCode.MISSING_IDEMPOTENCY_KEY)
-   -- see CONTRACT.md's "Idempotency" section for why this is a
-   contract requirement, not an optional nicety.
-
-3. Authentication for remote destinations (DispatchErrorCode.AUTH_NOT_CONFIGURED)
-   -- HTTPS protects the transport; a remote Mailing Agent call carrying
-   a plaintext credential must also not be anonymous.
-
-4. Response validation (DispatchErrorCode.INVALID_RESPONSE / REJECTED) --
-   this one runs an actual (local, mocked-transport) HTTP round trip, so
-   these tests patch httpx.AsyncClient.post rather than relying on a
-   fail-closed short-circuit.
-
-5. Timeout parsing -- MAILING_AGENT_TIMEOUT_SECONDS must be finite and
-   positive or the client falls back to DEFAULT_TIMEOUT_SECONDS.
-
-NEVER SENDS REAL MAIL: fail-closed tests never reach httpx at all; the
-loopback-connectivity test fails fast against an intentionally-closed
-local port (no external network); the response-validation tests mock
-httpx.AsyncClient.post directly, so no network call happens there either.
+Proves:
+  * the credential-bearing P1.4 contract is gone (no function, no parameter)
+  * the dispatch body is exactly Mailer's M2 shape and contains no sender /
+    SMTP / credential / message / tenant / mailbox field, at any depth
+  * per-organization key resolution (fail closed), X-API-Key, no Bearer
+  * transport rules (https or loopback only), no redirects, safe error codes
+  * strict response handling and idempotent, byte-stable payloads
 """
 
+import json
 import math
-from unittest.mock import AsyncMock, patch
+from typing import Callable, List
 
+import httpx
 import pytest
 
+from core.infrastructure.mailing_agent import client as mc
 from core.infrastructure.mailing_agent.client import (
     DEFAULT_TIMEOUT_SECONDS,
     DispatchErrorCode,
     _is_secure_transport,
     _timeout_seconds,
-    dispatch_outreach_action,
+    build_generated_outreach_payload,
+    org_api_key,
+    send_request,
+    submit_generated_outreach,
 )
 
-_CALL_KWARGS = dict(
-    outreach_action_id=1,
-    organization_id=1,
-    correlation_id=None,
-    sender_email_address="sender@example.com",
-    sender_display_name=None,
-    smtp_host="smtp.example.com",
-    smtp_port=587,
-    security_mode="starttls",
-    smtp_username="sender@example.com",
-    credential_type="smtp_password",
-    plaintext_credential="do-not-leak-me",
-    recipient_email="lead@example.com",
-    recipient_name=None,
-    subject="Hi",
-    body="Body",
-)
+ORG = 7
+KEY = "mailer-key-for-org-7"
+_REAL_ASYNC_CLIENT = httpx.AsyncClient  # captured before any test patches it
 
 
-class TestSecureTransportValidation:
-    """Direct unit tests of the URL allowlist itself -- see
-    client.py's module docstring for the exact rule: https:// always
-    qualifies; http:// only for localhost/127.0.0.1/::1."""
+@pytest.fixture()
+def wire(monkeypatch):
+    """Route every httpx.AsyncClient in the client module through a MockTransport.
+    Returns (requests_seen, set_handler)."""
+    seen: List[httpx.Request] = []
+    state = {"handler": lambda req: httpx.Response(202, json={"accepted": True, "mailing_agent_reference": "ref-1"})}
 
+    def _handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return state["handler"](request)
+
+    def _factory(*args, **kwargs):
+        kwargs["transport"] = httpx.MockTransport(_handler)
+        return _REAL_ASYNC_CLIENT(*args, **kwargs)
+
+    monkeypatch.setattr(mc.httpx, "AsyncClient", _factory)
+    monkeypatch.setenv("MAILING_AGENT_BASE_URL", "https://mailer.example.com")
+    monkeypatch.setenv("MAILING_AGENT_ORG_API_KEYS", json.dumps({str(ORG): KEY, "8": "other-key"}))
+    monkeypatch.delenv("MAILING_AGENT_API_KEY", raising=False)
+
+    def set_handler(fn: Callable[[httpx.Request], httpx.Response]):
+        state["handler"] = fn
+
+    return seen, set_handler
+
+
+def _kwargs(**over):
+    base = dict(
+        organization_id=ORG,
+        outreach_action_id=42,
+        idempotency_key="auto:abc123",
+        correlation_id="corr-1",
+        recipient_email="lead@example.com",
+        recipient_name="Ada Lovelace",
+        recipient_title="CTO",
+        recipient_company="Analytical Engines",
+        value_proposition="We help teams ship reliable software.",
+        recipient_facts=["Industry: software", "Founded: 1843"],
+    )
+    base.update(over)
+    return base
+
+
+def _all_keys(obj):
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            yield k
+            yield from _all_keys(v)
+    elif isinstance(obj, list):
+        for v in obj:
+            yield from _all_keys(v)
+
+
+# --------------------------------------------------------------------------
+# The old credential-bearing contract no longer exists
+# --------------------------------------------------------------------------
+class TestLegacyContractRemoved:
+    def test_old_dispatch_function_is_gone(self):
+        import core.infrastructure.mailing_agent as pkg
+
+        assert not hasattr(mc, "dispatch_outreach_action")
+        assert not hasattr(pkg, "dispatch_outreach_action")
+
+    def test_new_function_cannot_even_accept_a_credential_or_sender(self):
+        import inspect
+
+        params = set(inspect.signature(submit_generated_outreach).parameters)
+        forbidden = {"plaintext_credential", "credential", "smtp_host", "smtp_username", "security_mode",
+                     "sender_email_address", "subject", "body"}
+        assert not (params & forbidden)
+
+    async def test_legacy_single_api_key_is_ignored(self, wire, monkeypatch):
+        seen, _ = wire
+        monkeypatch.delenv("MAILING_AGENT_ORG_API_KEYS")
+        monkeypatch.setenv("MAILING_AGENT_API_KEY", "legacy-shared-key")
+        res = await submit_generated_outreach(**_kwargs())
+        assert res.error_code == DispatchErrorCode.AUTH_NOT_CONFIGURED
+        assert seen == []
+
+
+# --------------------------------------------------------------------------
+# Payload: exact M2 shape, nothing else
+# --------------------------------------------------------------------------
+class TestGeneratedOutreachPayload:
+    async def test_exact_wire_request(self, wire):
+        seen, _ = wire
+        res = await submit_generated_outreach(**_kwargs())
+        assert res.accepted is True and res.mailing_agent_reference == "ref-1"
+
+        assert len(seen) == 1
+        req = seen[0]
+        assert req.method == "POST"
+        assert str(req.url) == "https://mailer.example.com/integrations/leadboost/outreach-requests"
+        assert req.headers["x-api-key"] == KEY
+        assert "authorization" not in req.headers
+        assert json.loads(req.content) == {
+            "external_action_id": "42",
+            "idempotency_key": "auto:abc123",
+            "correlation_id": "corr-1",
+            "recipient": {"email": "lead@example.com", "name": "Ada Lovelace", "title": "CTO",
+                          "company": "Analytical Engines"},
+            "context": {"value_proposition": "We help teams ship reliable software.",
+                        "recipient_facts": ["Industry: software", "Founded: 1843"]},
+        }
+
+    async def test_no_credential_sender_message_tenant_or_mailbox_field_anywhere(self, wire):
+        seen, _ = wire
+        await submit_generated_outreach(**_kwargs())
+        body = json.loads(seen[0].content)
+        keys = {k.lower() for k in _all_keys(body)}
+        banned = {"sender", "smtp_host", "smtp_port", "smtp_username", "smtp_password", "password", "credential",
+                  "encrypted_credential", "credential_type", "security_mode", "subject", "body", "message",
+                  "organization_id", "tenant", "mailbox", "mailbox_reference", "mailbox_ref", "imap_password"}
+        assert keys.isdisjoint(banned), keys & banned
+        # and the wire headers carry no secret other than the Mailer API key
+        assert set(seen[0].headers) <= {"host", "accept", "accept-encoding", "connection", "user-agent",
+                                        "x-api-key", "content-type", "content-length"}
+
+    def test_optional_fields_are_omitted_not_sent_empty(self):
+        body = build_generated_outreach_payload(
+            outreach_action_id=1, idempotency_key="k", correlation_id=None, recipient_email="a@b.co",
+            recipient_name="  ", recipient_title=None, recipient_company="", value_proposition="vp",
+            recipient_facts=["", "  ", "real fact"],
+        )
+        assert body == {
+            "external_action_id": "1", "idempotency_key": "k",
+            "recipient": {"email": "a@b.co"},
+            "context": {"value_proposition": "vp", "recipient_facts": ["real fact"]},
+        }
+
+    def test_values_are_bounded_to_mailers_limits_instead_of_422(self):
+        body = build_generated_outreach_payload(
+            outreach_action_id=1, idempotency_key="k", correlation_id=None, recipient_email="a@b.co",
+            recipient_name="n" * 500, recipient_title="t" * 500, recipient_company="c" * 500,
+            value_proposition="v" * 5000, recipient_facts=["f" * 900] * 12,
+        )
+        assert len(body["context"]["value_proposition"]) == 2000
+        assert len(body["context"]["recipient_facts"]) == 8
+        assert all(len(f) == 500 for f in body["context"]["recipient_facts"])
+        assert all(len(body["recipient"][k]) == 200 for k in ("name", "title", "company"))
+
+    async def test_retry_sends_a_byte_identical_idempotent_request(self, wire):
+        seen, _ = wire
+        await submit_generated_outreach(**_kwargs())
+        await submit_generated_outreach(**_kwargs())
+        assert seen[0].content == seen[1].content
+        assert json.loads(seen[0].content)["idempotency_key"] == "auto:abc123"
+
+    async def test_empty_idempotency_key_is_refused_before_any_request(self, wire):
+        seen, _ = wire
+        res = await submit_generated_outreach(**_kwargs(idempotency_key=""))
+        assert res.error_code == DispatchErrorCode.MISSING_IDEMPOTENCY_KEY and seen == []
+
+
+# --------------------------------------------------------------------------
+# Responses are validated strictly
+# --------------------------------------------------------------------------
+class TestResponseHandling:
     @pytest.mark.parametrize(
-        "url",
+        "resp, expected",
         [
-            "https://mailing-agent.example.com",
-            "https://mailing-agent.example.com:8443",
-            "http://localhost",
-            "http://localhost:8001",
-            "http://127.0.0.1",
-            "http://127.0.0.1:8001",
-            "http://[::1]:8001",
+            (httpx.Response(202, json={}), DispatchErrorCode.INVALID_RESPONSE),
+            (httpx.Response(202, json={"accepted": "yes"}), DispatchErrorCode.INVALID_RESPONSE),
+            (httpx.Response(202, json=["accepted"]), DispatchErrorCode.INVALID_RESPONSE),
+            (httpx.Response(202, content=b"not json"), DispatchErrorCode.INVALID_RESPONSE),
+            (httpx.Response(202, json={"accepted": False}), DispatchErrorCode.REJECTED),
+            (httpx.Response(409, json={"detail": "x"}), DispatchErrorCode.CONFLICT),
+            (httpx.Response(422, json={"detail": "x"}), DispatchErrorCode.REJECTED),
+            (httpx.Response(401, json={"detail": "x"}), DispatchErrorCode.REJECTED),
+            (httpx.Response(503, json={"detail": "x"}), DispatchErrorCode.REJECTED),
+            (httpx.Response(302, headers={"location": "https://evil.example/"}), DispatchErrorCode.REJECTED),
         ],
     )
-    def test_accepted_urls(self, url):
-        assert _is_secure_transport(url) is True
+    async def test_non_success_shapes_map_to_safe_codes(self, wire, resp, expected):
+        seen, set_handler = wire
+        set_handler(lambda req: resp)
+        res = await submit_generated_outreach(**_kwargs())
+        assert res.accepted is False and res.error_code == expected
+        assert len(seen) == 1  # a 302 is never followed
+
+    async def test_non_string_reference_is_tolerated_as_none(self, wire):
+        _, set_handler = wire
+        set_handler(lambda req: httpx.Response(202, json={"accepted": True, "mailing_agent_reference": 5}))
+        res = await submit_generated_outreach(**_kwargs())
+        assert res.accepted is True and res.mailing_agent_reference is None
+
+    async def test_timeout_and_connection_failure_are_safe_codes_and_never_leak(self, wire, caplog):
+        _, set_handler = wire
+
+        def boom(req):
+            raise httpx.ReadTimeout("secret-detail-in-timeout")
+
+        set_handler(boom)
+        assert (await submit_generated_outreach(**_kwargs())).error_code == DispatchErrorCode.TIMEOUT
+
+        def refused(req):
+            raise httpx.ConnectError("secret-detail-in-connect")
+
+        set_handler(refused)
+        assert (await submit_generated_outreach(**_kwargs())).error_code == DispatchErrorCode.UNREACHABLE
+        assert "secret-detail" not in caplog.text and KEY not in caplog.text
+
+
+# --------------------------------------------------------------------------
+# Per-organization key resolution (tenant authority stays with Mailer)
+# --------------------------------------------------------------------------
+class TestOrganizationKeys:
+    def test_resolves_only_the_callers_own_key(self, monkeypatch):
+        monkeypatch.setenv("MAILING_AGENT_ORG_API_KEYS", json.dumps({"7": "k7", "8": "k8"}))
+        assert org_api_key(7) == "k7" and org_api_key(8) == "k8"
+        assert org_api_key(9) is None
 
     @pytest.mark.parametrize(
-        "url",
+        "raw",
+        ["", "   ", "not json", "[]", '"k"', "null", '{"7": ""}', '{"7": "   "}', '{"7": 5}', '{"07": "k"}'],
+    )
+    def test_everything_malformed_fails_closed(self, monkeypatch, raw):
+        monkeypatch.setenv("MAILING_AGENT_ORG_API_KEYS", raw)
+        assert org_api_key(7) is None
+
+    async def test_each_org_presents_its_own_key_never_anothers(self, wire):
+        seen, _ = wire
+        await submit_generated_outreach(**_kwargs(organization_id=7))
+        await submit_generated_outreach(**_kwargs(organization_id=8))
+        assert [r.headers["x-api-key"] for r in seen] == [KEY, "other-key"]
+
+    async def test_org_without_a_key_never_borrows_another_orgs(self, wire):
+        seen, _ = wire
+        res = await submit_generated_outreach(**_kwargs(organization_id=9))
+        assert res.error_code == DispatchErrorCode.AUTH_NOT_CONFIGURED and seen == []
+
+    async def test_organization_id_is_never_in_the_body_even_to_identify_the_tenant(self, wire):
+        seen, _ = wire
+        await submit_generated_outreach(**_kwargs())
+        assert b"organization" not in seen[0].content and b'"7"' not in seen[0].content
+
+
+# --------------------------------------------------------------------------
+# Transport rules -- fail closed before any network attempt
+# --------------------------------------------------------------------------
+class TestTransport:
+    @pytest.mark.parametrize(
+        "url, ok",
         [
-            "http://mailing-agent.example.com",
-            "http://10.0.0.50:8001",
-            "http://remote-host:8001",
-            "ftp://mailing-agent.example.com",
-            "",
-            "not-a-url",
+            ("https://mailer.example.com", True),
+            ("http://localhost:8000", True),
+            ("http://127.0.0.1", True),
+            ("http://[::1]:8000", True),
+            ("http://mailer.example.com", False),
+            ("http://10.0.0.5:8000", False),
+            ("http://localhost.evil.com", False),
+            ("ftp://mailer.example.com", False),
+            ("mailer.example.com", False),
         ],
     )
-    def test_rejected_urls(self, url):
-        assert _is_secure_transport(url) is False
+    def test_secure_transport_allowlist(self, url, ok):
+        assert _is_secure_transport(url) is ok
 
+    async def test_unconfigured_is_refused(self, wire, monkeypatch):
+        seen, _ = wire
+        monkeypatch.delenv("MAILING_AGENT_BASE_URL")
+        res = await submit_generated_outreach(**_kwargs())
+        assert res.error_code == DispatchErrorCode.NOT_CONFIGURED and seen == []
 
-class TestDispatchFailsClosed:
-    """dispatch_outreach_action's own fail-closed behavior -- these three
-    checks happen, in order, before any httpx call is constructed."""
+    @pytest.mark.parametrize("url", ["http://mailer.example.com", "http://10.1.2.3", "http://localhost.evil.com"])
+    async def test_insecure_remote_is_refused_even_with_a_valid_key(self, wire, monkeypatch, url):
+        seen, _ = wire
+        monkeypatch.setenv("MAILING_AGENT_BASE_URL", url)
+        res = await submit_generated_outreach(**_kwargs())
+        assert res.error_code == DispatchErrorCode.INSECURE_TRANSPORT and seen == []
 
-    async def test_not_configured_never_attempts_network_call(self, monkeypatch):
-        monkeypatch.delenv("MAILING_AGENT_BASE_URL", raising=False)
-        result = await dispatch_outreach_action(idempotency_key="key-1", **_CALL_KWARGS)
-        assert result.accepted is False
-        assert result.error_code == DispatchErrorCode.NOT_CONFIGURED
+    async def test_loopback_http_is_allowed(self, wire, monkeypatch):
+        seen, _ = wire
+        monkeypatch.setenv("MAILING_AGENT_BASE_URL", "http://127.0.0.1:8000/")
+        res = await submit_generated_outreach(**_kwargs())
+        assert res.accepted is True
+        assert str(seen[0].url) == "http://127.0.0.1:8000/integrations/leadboost/outreach-requests"
 
-    async def test_missing_idempotency_key_never_attempts_network_call(self, monkeypatch):
-        monkeypatch.setenv("MAILING_AGENT_BASE_URL", "https://mailing-agent.example.com")
-        result = await dispatch_outreach_action(idempotency_key="", **_CALL_KWARGS)
-        assert result.accepted is False
-        assert result.error_code == DispatchErrorCode.MISSING_IDEMPOTENCY_KEY
-
-    async def test_insecure_remote_http_never_attempts_network_call(self, monkeypatch):
-        # If this ever tried a real network call it would have to
-        # actually resolve/connect to a nonexistent host -- the whole
-        # point of this test is that it must never try.
-        monkeypatch.setenv("MAILING_AGENT_BASE_URL", "http://remote-mailing-agent.example.com")
-        result = await dispatch_outreach_action(idempotency_key="key-1", **_CALL_KWARGS)
-        assert result.accepted is False
-        assert result.error_code == DispatchErrorCode.INSECURE_TRANSPORT
-
-    async def test_insecure_remote_ip_never_attempts_network_call(self, monkeypatch):
-        monkeypatch.setenv("MAILING_AGENT_BASE_URL", "http://10.0.0.50:8001")
-        result = await dispatch_outreach_action(idempotency_key="key-1", **_CALL_KWARGS)
-        assert result.accepted is False
-        assert result.error_code == DispatchErrorCode.INSECURE_TRANSPORT
-
-    async def test_local_http_passes_transport_check_and_actually_attempts_the_call(self, monkeypatch):
-        """Distinguishes "rejected transport, no attempt made" (the
-        tests above) from "accepted transport, attempt made" -- the
-        local-loopback exception must actually let a request through to
-        httpx, not silently no-op. Port 1 on loopback has nothing
-        listening, so this fails fast with UNREACHABLE -- proving the
-        call was attempted, without needing a real Mailing Agent or
-        touching any external network."""
-        monkeypatch.setenv("MAILING_AGENT_BASE_URL", "http://127.0.0.1:1")
-        monkeypatch.setenv("MAILING_AGENT_TIMEOUT_SECONDS", "2")
-        result = await dispatch_outreach_action(idempotency_key="key-1", **_CALL_KWARGS)
-        assert result.accepted is False
-        assert result.error_code == DispatchErrorCode.UNREACHABLE
-
-
-class TestAuthenticationRequiredForRemote:
-    """A remote (non-loopback) Mailing Agent call carries a plaintext
-    SMTP credential -- HTTPS protects the transport, but the call must
-    also not be anonymous. Loopback keeps the key optional (local dev)."""
-
-    async def test_remote_https_without_api_key_fails_closed(self, monkeypatch):
-        monkeypatch.setenv("MAILING_AGENT_BASE_URL", "https://mailing-agent.example.com")
-        monkeypatch.delenv("MAILING_AGENT_API_KEY", raising=False)
-        result = await dispatch_outreach_action(idempotency_key="key-1", **_CALL_KWARGS)
-        assert result.accepted is False
-        assert result.error_code == DispatchErrorCode.AUTH_NOT_CONFIGURED
-
-    async def test_remote_https_with_api_key_passes_the_auth_check(self, monkeypatch):
-        """Proves the auth check is actually passed (not just always
-        failing) when a key is present -- same "fails fast against a
-        real but closed connection" technique as the loopback test
-        above, this time against a remote-shaped host that simply won't
-        resolve/connect from this sandbox, so it's UNREACHABLE rather
-        than AUTH_NOT_CONFIGURED."""
-        monkeypatch.setenv("MAILING_AGENT_BASE_URL", "https://mailing-agent.invalid")
-        monkeypatch.setenv("MAILING_AGENT_API_KEY", "test-key")
-        monkeypatch.setenv("MAILING_AGENT_TIMEOUT_SECONDS", "2")
-        result = await dispatch_outreach_action(idempotency_key="key-1", **_CALL_KWARGS)
-        assert result.accepted is False
-        assert result.error_code == DispatchErrorCode.UNREACHABLE
-
-    async def test_local_http_without_api_key_does_not_fail_closed_on_auth(self, monkeypatch):
-        """Loopback is exempt from the auth requirement -- this reaches
-        the same UNREACHABLE-via-closed-port outcome as
-        TestDispatchFailsClosed's loopback test, proving AUTH_NOT_CONFIGURED
-        was never raised for it."""
-        monkeypatch.setenv("MAILING_AGENT_BASE_URL", "http://127.0.0.1:1")
-        monkeypatch.delenv("MAILING_AGENT_API_KEY", raising=False)
-        monkeypatch.setenv("MAILING_AGENT_TIMEOUT_SECONDS", "2")
-        result = await dispatch_outreach_action(idempotency_key="key-1", **_CALL_KWARGS)
-        assert result.accepted is False
-        assert result.error_code == DispatchErrorCode.UNREACHABLE
-
-
-def _mock_response(status_code, json_body=None, json_raises=False):
-    """Builds a minimal stand-in for an httpx.Response -- just enough
-    surface (.status_code, .json()) for dispatch_outreach_action's own
-    response-handling code, without a real HTTP round trip."""
-
-    class _Resp:
-        def __init__(self):
-            self.status_code = status_code
-
-        def json(self):
-            if json_raises:
-                raise ValueError("not valid JSON")
-            return json_body
-
-    return _Resp()
-
-
-class TestResponseValidation:
-    """dispatch_outreach_action's handling of what the Mailing Agent
-    actually sends back -- httpx.AsyncClient.post is mocked directly so
-    these exercise the real response-parsing code without a network
-    call. See client.py's module docstring for the REJECTED (bad status
-    code) vs INVALID_RESPONSE (bad body) split."""
-
-    async def _dispatch_with_mocked_response(self, monkeypatch, response):
-        monkeypatch.setenv("MAILING_AGENT_BASE_URL", "https://mailing-agent.example.com")
-        monkeypatch.setenv("MAILING_AGENT_API_KEY", "test-key")
-        with patch("httpx.AsyncClient.post", new=AsyncMock(return_value=response)):
-            return await dispatch_outreach_action(idempotency_key="key-1", **_CALL_KWARGS)
-
-    async def test_empty_object_is_never_treated_as_accepted(self, monkeypatch):
-        """The exact bug being fixed: {} used to default to accepted=True."""
-        result = await self._dispatch_with_mocked_response(monkeypatch, _mock_response(200, {}))
-        assert result.accepted is False
-        assert result.error_code == DispatchErrorCode.INVALID_RESPONSE
-
-    async def test_non_boolean_accepted_is_invalid(self, monkeypatch):
-        result = await self._dispatch_with_mocked_response(
-            monkeypatch, _mock_response(200, {"accepted": "yes"})
-        )
-        assert result.accepted is False
-        assert result.error_code == DispatchErrorCode.INVALID_RESPONSE
-
-    async def test_non_object_json_body_is_invalid(self, monkeypatch):
-        result = await self._dispatch_with_mocked_response(monkeypatch, _mock_response(200, [True]))
-        assert result.accepted is False
-        assert result.error_code == DispatchErrorCode.INVALID_RESPONSE
-
-    async def test_malformed_json_body_is_invalid(self, monkeypatch):
-        result = await self._dispatch_with_mocked_response(
-            monkeypatch, _mock_response(200, json_raises=True)
-        )
-        assert result.accepted is False
-        assert result.error_code == DispatchErrorCode.INVALID_RESPONSE
-
-    async def test_well_formed_accepted_true_succeeds(self, monkeypatch):
-        result = await self._dispatch_with_mocked_response(
-            monkeypatch, _mock_response(200, {"accepted": True, "mailing_agent_reference": "ref-123"})
-        )
-        assert result.accepted is True
-        assert result.mailing_agent_reference == "ref-123"
-
-    async def test_explicit_accepted_false_is_rejected_not_invalid(self, monkeypatch):
-        result = await self._dispatch_with_mocked_response(monkeypatch, _mock_response(200, {"accepted": False}))
-        assert result.accepted is False
-        assert result.error_code == DispatchErrorCode.REJECTED
-
-    @pytest.mark.parametrize("status_code", [100, 302, 400, 429, 500, 503])
-    async def test_every_non_2xx_status_is_rejected(self, monkeypatch, status_code):
-        result = await self._dispatch_with_mocked_response(
-            monkeypatch, _mock_response(status_code, {"accepted": True})
-        )
-        assert result.accepted is False
-        assert result.error_code == DispatchErrorCode.REJECTED
-
-
-class TestTimeoutValidation:
-    """MAILING_AGENT_TIMEOUT_SECONDS must parse to a finite, positive
-    number or the client silently falls back to DEFAULT_TIMEOUT_SECONDS
-    -- float() itself accepts "nan"/"inf" without raising, and would
-    also accept a nonsensical 0 or negative value, none of which are a
-    usable httpx timeout."""
-
-    @pytest.mark.parametrize("raw", ["7", "0.5", "120"])
-    def test_valid_values_are_used_as_is(self, monkeypatch, raw):
+    @pytest.mark.parametrize(
+        "raw, expected",
+        [("5", 5.0), ("0.5", 0.5), ("abc", DEFAULT_TIMEOUT_SECONDS), ("0", DEFAULT_TIMEOUT_SECONDS),
+         ("-3", DEFAULT_TIMEOUT_SECONDS), ("nan", DEFAULT_TIMEOUT_SECONDS), ("inf", DEFAULT_TIMEOUT_SECONDS)],
+    )
+    def test_timeout_parsing(self, monkeypatch, raw, expected):
         monkeypatch.setenv("MAILING_AGENT_TIMEOUT_SECONDS", raw)
-        assert _timeout_seconds() == float(raw)
+        assert _timeout_seconds() == expected and math.isfinite(_timeout_seconds())
 
-    @pytest.mark.parametrize("raw", ["0", "-1", "nan", "inf", "-inf", "not-a-number", ""])
-    def test_invalid_values_fall_back_to_default(self, monkeypatch, raw):
-        monkeypatch.setenv("MAILING_AGENT_TIMEOUT_SECONDS", raw)
-        assert _timeout_seconds() == float(DEFAULT_TIMEOUT_SECONDS)
-
-    def test_unset_falls_back_to_default(self, monkeypatch):
-        monkeypatch.delenv("MAILING_AGENT_TIMEOUT_SECONDS", raising=False)
-        assert _timeout_seconds() == float(DEFAULT_TIMEOUT_SECONDS)
-
-    def test_default_itself_is_sane(self):
-        assert math.isfinite(DEFAULT_TIMEOUT_SECONDS)
-        assert DEFAULT_TIMEOUT_SECONDS > 0
+    async def test_send_request_get_has_no_body_or_content_type(self, wire):
+        seen, _ = wire
+        await send_request("GET", "/mailboxes", organization_id=ORG)
+        assert seen[0].content == b"" and "content-type" not in seen[0].headers

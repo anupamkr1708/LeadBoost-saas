@@ -15,7 +15,7 @@ from core.domain.models.qualification_settings import (
     OrganizationQualificationSettings,
     DEFAULT_QUALIFICATION_THRESHOLD,
 )
-from core.domain.models.email_account import EmailAccount, VerificationStatus
+from core.domain.models.email_account import EmailAccount, MailerSyncState, VerificationStatus
 from core.domain.models.outreach_action import OutreachAction, OutreachState
 from core.domain.models.outreach_policy import OrganizationOutreachPolicy
 from core.domain.schemas.user import UserCreate, UserUpdate, UserInDB
@@ -618,10 +618,13 @@ def update_email_account(db: Session, account: EmailAccount, payload: EmailAccou
     new_credential = data.pop("credential", None)
 
     invalidate_verification = False
+    mailer_sync_relevant = False
     for field, raw_value in data.items():
         value = _enum_value(raw_value)
         if field in _EMAIL_ACCOUNT_FIELDS_THAT_INVALIDATE_VERIFICATION and getattr(account, field) != value:
             invalidate_verification = True
+        if field == "is_active" and getattr(account, field) != value:
+            mailer_sync_relevant = True
         setattr(account, field, value)
 
     if new_credential:
@@ -632,6 +635,13 @@ def update_email_account(db: Session, account: EmailAccount, payload: EmailAccou
         account.verification_status = VerificationStatus.UNVERIFIED
         account.verified_at = None
         account.verification_error_code = None
+        mailer_sync_relevant = True
+
+    # L1: the Mailer-owned mailbox must be reconciled with this change. Marked in
+    # the SAME commit as the change itself, so a crash before the (separate,
+    # non-transactional) Mailer call can never leave a stale 'synced' marker.
+    if mailer_sync_relevant:
+        account.mailer_sync_state = MailerSyncState.PENDING
 
     db.commit()
     db.refresh(account)
@@ -647,6 +657,7 @@ def disable_email_account(db: Session, account: EmailAccount) -> EmailAccount:
     should decide on P1.4's behalf. Disabling also excludes the account
     from P1.4's future sender-selection query without losing the row."""
     account.is_active = False
+    account.mailer_sync_state = MailerSyncState.PENDING  # L1: Mailer mailbox must be disabled too
     db.commit()
     db.refresh(account)
     return account
@@ -661,6 +672,56 @@ def record_email_account_verification(
     account.verification_status = status
     account.verification_error_code = error_code
     account.verified_at = datetime.now(timezone.utc) if status == VerificationStatus.VERIFIED else account.verified_at
+    # L1: every verification outcome can change whether the Mailer mailbox may be ACTIVE.
+    account.mailer_sync_state = MailerSyncState.PENDING
+    db.commit()
+    db.refresh(account)
+    return account
+
+
+def count_eligible_email_accounts(db: Session, organization_id: int) -> int:
+    """L1: accounts that could send right now (active AND verified). Integrated
+    outbound requires exactly one -- Mailer M2 selects its sole ACTIVE mailbox,
+    so LeadBoost must never leave that choice ambiguous. Organization-scoped."""
+    return (
+        db.query(EmailAccount)
+        .filter(
+            EmailAccount.organization_id == organization_id,
+            EmailAccount.is_active.is_(True),
+            EmailAccount.verification_status == VerificationStatus.VERIFIED,
+        )
+        .count()
+    )
+
+
+def lock_email_account(db: Session, organization_id: int, account_id: int) -> Optional[EmailAccount]:
+    """L1: organization-scoped fetch that takes a row lock on PostgreSQL
+    (SELECT ... FOR UPDATE) so two Mailer reconciles of one account serialize,
+    and a concurrent LeadBoost change waits for the in-flight reconcile
+    instead of racing it. SQLite (the test DB) has no row locks; SQLAlchemy
+    omits FOR UPDATE there. populate_existing refreshes a stale identity-map copy."""
+    return (
+        db.query(EmailAccount)
+        .filter(EmailAccount.id == account_id, EmailAccount.organization_id == organization_id)
+        .populate_existing()
+        .with_for_update()
+        .first()
+    )
+
+
+def record_mailer_sync_result(
+    db: Session,
+    account: EmailAccount,
+    *,
+    mailbox_ref: Optional[str],
+    state: str,
+    error_code: Optional[str],
+) -> EmailAccount:
+    """Persists the outcome of a Mailer reconcile. The ref is only ever written
+    here, from a Mailer response -- no request schema can set it."""
+    account.mailer_mailbox_ref = mailbox_ref
+    account.mailer_sync_state = state
+    account.mailer_sync_error_code = error_code
     db.commit()
     db.refresh(account)
     return account

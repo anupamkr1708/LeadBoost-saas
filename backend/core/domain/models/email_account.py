@@ -101,6 +101,50 @@ class SecurityMode:
     ALL = (STARTTLS, TLS)
 
 
+class MailerSyncState:
+    """L1: whether the Mailer-owned Mailbox mirrors this account's CURRENT state.
+
+    Only two persisted states, on purpose. LeadBoost and Mailer are separate
+    deployments, so no transaction spans "LeadBoost row changed" and "Mailer
+    mailbox changed". Instead every LeadBoost change that matters to the
+    Mailer (verification outcome, disable, connection/credential change)
+    flips this to PENDING *in the same commit*, and only a successful
+    reconcile flips it back to SYNCED. A crash, timeout or Mailer outage
+    therefore can never leave a stale "synced" marker; the worst case is a
+    PENDING row that integrated sending refuses to use until it converges.
+
+    PENDING + mailer_sync_error_code is "tried and failed"; PENDING with no
+    code is "not attempted yet". Plain strings, not a DB enum/CHECK, like the
+    other status vocabularies on this model (additive, zero-migration).
+    """
+
+    PENDING = "pending"
+    SYNCED = "synced"
+
+    ALL = (PENDING, SYNCED)
+
+
+class MailerSyncErrorCode:
+    """Closed, safe classification of why the last reconcile did not converge.
+
+    Never raw exception/response text -- a Mailer response or an httpx error
+    could echo request data, and this value is returned to the frontend.
+    """
+
+    NOT_CONFIGURED = "mailer_not_configured"            # no MAILING_AGENT_BASE_URL
+    ORG_KEY_NOT_CONFIGURED = "mailer_org_key_not_configured"
+    INSECURE_TRANSPORT = "mailer_insecure_transport"    # refuses to carry a credential over http
+    UNREACHABLE = "mailer_unreachable"
+    TIMEOUT = "mailer_timeout"
+    REJECTED = "mailer_rejected"                        # non-2xx other than the handled ones
+    INVALID_RESPONSE = "mailer_invalid_response"
+    MAILER_UNAVAILABLE = "mailer_unavailable"           # 5xx, e.g. Mailer has no encryption key
+    UNSUPPORTED_SECURITY_MODE = "unsupported_security_mode"  # implicit TLS: Mailer is STARTTLS-only
+    NO_CREDENTIAL = "no_credential"
+    CREDENTIAL_UNREADABLE = "credential_unreadable"
+    SYNC_UNSTABLE = "sync_unstable"                     # LeadBoost state kept changing mid-sync
+
+
 class EmailAccount(Base):
     __tablename__ = "email_accounts"
 
@@ -131,6 +175,20 @@ class EmailAccount(Base):
     # response/exception text. See smtp_verifier.py's VerificationResult.
     verification_error_code = Column(String, nullable=True)
 
+    # --- L1: link to the Mailer-owned Mailbox (see MailerSyncState) ---
+    # Opaque Mailer `public_reference`. Set ONLY by the server from a Mailer
+    # response -- it is in no request/response schema, so a client can neither
+    # set nor read it. It is never a tenant identifier: every access path
+    # still filters on organization_id, and Mailer independently resolves the
+    # tenant from the per-organization API key it is called with.
+    mailer_mailbox_ref = Column(String, nullable=True)
+    mailer_sync_state = Column(
+        String, nullable=False, default=MailerSyncState.PENDING, server_default=MailerSyncState.PENDING
+    )
+    # Safe MailerSyncErrorCode of the last failed reconcile; NULL when the last
+    # reconcile succeeded or none has been attempted.
+    mailer_sync_error_code = Column(String, nullable=True)
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -139,6 +197,9 @@ class EmailAccount(Base):
         # can legitimately be a sender mailbox for two different
         # organizations (e.g. a shared agency inbox, or simple coincidence).
         UniqueConstraint("organization_id", "email_address", name="uq_email_accounts_org_email"),
+        # L1: one LeadBoost account <-> one Mailer mailbox. NULLs (not yet
+        # provisioned) are not considered equal by PostgreSQL or SQLite.
+        UniqueConstraint("mailer_mailbox_ref", name="uq_email_accounts_mailer_mailbox_ref"),
         # organization_id already gets a btree index from index=True above
         # (every list/ownership-check query filters on it); this second
         # index supports the one additional real access pattern -- listing

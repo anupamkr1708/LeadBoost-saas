@@ -1,22 +1,27 @@
 """
-Mailing Agent contract boundary (P1.4).
+Mailer contract boundary (L1).
 
-Everything LeadBoost sends to the separate Mailing Agent service (a
-different repository/deployment -- see CONTRACT.md in this package for
-the full wire contract) lives in this package. Nothing outside
-`client.py` should construct a Mailing Agent request payload directly.
+Everything LeadBoost sends to the separate Mailer service (a different
+repository/deployment -- see CONTRACT.md in this package for the wire
+contract) lives in this package. Nothing outside it should construct a
+Mailer request payload directly.
+
+  client.py          transport + the generated-outreach handoff (NO credential)
+  mailbox_client.py  mailbox provisioning (the only credential-bearing calls)
 """
 
 from core.infrastructure.mailing_agent.client import (
     DispatchErrorCode,
     DispatchResult,
-    dispatch_outreach_action,
+    MailerResponse,
     is_configured,
+    submit_generated_outreach,
 )
 
 __all__ = [
     "DispatchErrorCode",
     "DispatchResult",
-    "dispatch_outreach_action",
+    "MailerResponse",
     "is_configured",
+    "submit_generated_outreach",
 ]
