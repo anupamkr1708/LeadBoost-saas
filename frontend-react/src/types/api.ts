@@ -435,6 +435,41 @@ export interface OutreachAction {
   updated_at: string | null;
 }
 
+// C9.3: GET /api/v2/outreach-actions/{id}/mailer-state -- a read-only, product-level view
+// of the Mailing Agent's authoritative delivery state and the recipient's conversation.
+// Provenance: backend core/domain/schemas/outreach_mailer_state.py. This is NOT the
+// Mailing Agent's own wire format (the backend never forwards that to the browser).
+export type MailerDeliveryState = "queued" | "sending" | "sent" | "failed" | "unknown";
+
+export type MailerAvailability = "available" | "not_dispatched" | "not_found_at_mailer" | "mailer_unavailable";
+
+export interface MailerConversationMessage {
+  direction: "outbound" | "inbound";
+  subject: string | null;
+  /** Third-party-controlled text (inbound mail is untrusted): render as plain text only. */
+  body: string;
+  body_truncated: boolean;
+  created_at: string | null;
+  /** Outbound messages only; null for inbound. */
+  delivery_state: MailerDeliveryState | null;
+}
+
+export interface MailerStateView {
+  delivery_state: MailerDeliveryState;
+  updated_at: string | null;
+  /** The most recent messages of the recipient's conversation, oldest first. */
+  messages: MailerConversationMessage[];
+  /** True when older messages exist beyond this window. */
+  has_more: boolean;
+}
+
+export interface OutreachMailerState {
+  availability: MailerAvailability;
+  /** A closed backend code; never shown verbatim to the user. */
+  error_code: string | null;
+  mailer: MailerStateView | null;
+}
+
 export interface OutreachActionCreatePayload {
   lead_id: number;
   email_account_id: number;

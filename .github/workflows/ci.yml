@@ -221,6 +221,51 @@ jobs:
           path: backend/test-results.xml
           retention-days: 14
 
+  cross-service-e2e:
+    # C9.3: LeadBoost's real API + client against the REAL Mailer Agent, run as a separate process.
+    # The two services pin mutually incompatible dependencies (e.g. `cryptography`), so each gets its
+    # own virtualenv -- as in production, they never share an interpreter. Needs the Mailer revision
+    # that contains the C9.3 conversation endpoint: merge the Mailer change first (or point `ref`
+    # at its branch while both PRs are open).
+    name: Cross-service E2E (LeadBoost <-> Mailer)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/checkout@v4
+        with:
+          repository: anupamkr1708/LeadBoost-mail-agent
+          ref: main
+          path: mailer-agent
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install LeadBoost backend
+        working-directory: backend
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio
+
+      - name: Install the Mailer Agent into its own virtualenv
+        run: |
+          python -m venv "$RUNNER_TEMP/mailer-venv"
+          "$RUNNER_TEMP/mailer-venv/bin/pip" install --upgrade pip
+          "$RUNNER_TEMP/mailer-venv/bin/pip" install -r mailer-agent/requirements.txt
+
+      - name: Run the cross-service E2E
+        working-directory: backend
+        env:
+          MAILER_REPO_PATH: ${{ github.workspace }}/mailer-agent
+          MAILER_PYTHON: ${{ runner.temp }}/mailer-venv/bin/python
+          E2E_REQUIRE_MAILER: "1"
+          DATABASE_URL: "sqlite:///./ci_e2e.db"
+          SECRET_KEY: "ci-test-secret-not-for-production-use-only"
+          ENVIRONMENT: "development"
+        run: pytest tests/e2e -v
+
   security-scan:
     name: Dependency security scan
     runs-on: ubuntu-latest

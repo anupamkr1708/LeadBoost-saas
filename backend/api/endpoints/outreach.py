@@ -21,11 +21,12 @@ supplied in the request body/path instead.
 
 from typing import Any, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
 from core.domain.models.user import User
 from core.domain.schemas.outreach_action import OutreachAction as OutreachActionSchema, OutreachActionCreate
+from core.domain.schemas.outreach_mailer_state import OutreachMailerState
 from core.domain.schemas.outreach_policy import OutreachPolicy as OutreachPolicySchema, OutreachPolicyUpdate
 from core.infrastructure.auth.security import get_current_user
 from core.infrastructure.database import get_db
@@ -36,7 +37,7 @@ from core.infrastructure.database.crud import (
     update_outreach_policy,
 )
 from core.infrastructure.logging import get_logger
-from application.services import outreach_service
+from application.services import outreach_mailer_state, outreach_service
 from application.services.outreach_service import OutreachError, OutreachErrorCode
 
 logger = get_logger(__name__)
@@ -122,6 +123,30 @@ async def read_outreach_action_endpoint(
     if action is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Outreach action not found")
     return action
+
+
+@router.get("/outreach-actions/{action_id}/mailer-state", response_model=OutreachMailerState)
+async def read_outreach_mailer_state_endpoint(
+    action_id: int,
+    response: Response,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Any:
+    """Read-only (C9.3): the Mailer's authoritative delivery state and the actual
+    conversation for this outreach action, fetched server-side. The browser talks
+    only to LeadBoost; the Mailer's URL, key and schema never reach it. Mailer-side
+    problems (404, timeout, 5xx, bad schema) are reported in `availability` /
+    `error_code` with HTTP 200 -- never as a false success and never as raw error
+    text; 404 here means only that the LeadBoost action does not exist in the
+    caller's organization. Never mutates the action."""
+    try:
+        state = await outreach_mailer_state.get_outreach_mailer_state(
+            db, organization_id=current_user.organization_id, action_id=action_id
+        )
+    except OutreachError as exc:
+        _raise_for(exc)
+    response.headers["Cache-Control"] = "no-store"  # private message content
+    return state
 
 
 @router.post("/outreach-actions/{action_id}/approve", response_model=OutreachActionSchema)

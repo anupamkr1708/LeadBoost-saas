@@ -8,6 +8,7 @@ import type { OutreachActionCreatePayload, OutreachPolicyUpdatePayload } from "@
 
 const listKey = (leadId?: number) => ["outreach-actions", leadId ?? "all"];
 const policyKey = (orgId: number) => ["outreach-policy", orgId];
+const mailerStateKey = (actionId: number) => ["outreach-mailer-state", actionId];
 
 /** Outreach actions for a single lead -- the lead detail view's own
  * outreach history (mirrors how ai_insights is fetched per-lead). */
@@ -17,6 +18,20 @@ export function useOutreachActionsForLead(leadId: number) {
     queryFn: () => outreachApi.list({ leadId }),
     enabled: leadId > 0,
     staleTime: 10_000,
+  });
+}
+
+/** C9.3 -- the Mailing Agent's delivery state and conversation for one action, via the
+ * LeadBoost API. Read-only: no mutation, no store, no polling -- it refetches only on
+ * mount / window focus / an explicit refetch(), like any other query here. `enabled`
+ * lets the caller skip the request entirely (e.g. before a first dispatch attempt). */
+export function useOutreachMailerState(actionId: number, enabled = true) {
+  return useQuery({
+    queryKey: mailerStateKey(actionId),
+    queryFn: () => outreachApi.getMailerState(actionId),
+    enabled: enabled && actionId > 0,
+    staleTime: 15_000,
+    retry: 1,
   });
 }
 

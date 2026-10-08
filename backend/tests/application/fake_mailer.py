@@ -17,6 +17,10 @@ E2E):
     indistinguishable from an unknown one); status/host/port/use_tls/username/password
   * POST /integrations/leadboost/outreach-requests -> 202 {accepted, mailing_agent_reference},
     idempotent on idempotency_key (a replay returns the same reference, creates nothing)
+  * GET /integrations/leadboost/outreach-actions/{key}/conversation?limit=N (C9.3) -> 200
+    {action, messages, has_more} for the CALLER'S dispatch only (404 for unknown or
+    foreign keys, indistinguishable); the key may contain '/', so the whole segment
+    between the fixed prefix and "/conversation" is the key
   * secrets are stored but never returned
 
 Fault injection: fail_next / timeout_next / connect_error_next / lose_response_next,
@@ -35,6 +39,7 @@ import httpx
 REAL_ASYNC_CLIENT = httpx.AsyncClient  # captured before any test patches it
 
 MAILBOX_FIELDS = {"email_address", "smtp_host", "smtp_port", "smtp_use_tls", "smtp_username", "smtp_password"}
+CONVERSATION_PREFIX = "/integrations/leadboost/outreach-actions/"
 PATCH_FIELDS = {"status", "smtp_host", "smtp_port", "smtp_use_tls", "smtp_username", "smtp_password"}
 
 
@@ -48,6 +53,7 @@ class Call:
     raw: bytes
     headers: Dict[str, str]
     status: int = 0
+    raw_target: str = ""  # path + query exactly as sent (percent-encoding intact)
 
 
 @dataclass
@@ -98,7 +104,8 @@ class FakeMailer:
         except ValueError:
             body = None
         api_key = request.headers.get("x-api-key")
-        call = Call(request.method, request.url.path, self.keys.get(api_key), api_key, body, raw, dict(request.headers))
+        call = Call(request.method, request.url.path, self.keys.get(api_key), api_key, body, raw, dict(request.headers),
+                    raw_target=request.url.raw_path.decode("ascii"))
         self.calls.append(call)
 
         if self._faults:
@@ -163,8 +170,24 @@ class FakeMailer:
             if len(self.active_boxes(t)) != 1:
                 return httpx.Response(409, json={"detail": "exactly one active mailbox required"})
             ref = f"dsp_{uuid.uuid4().hex[:10]}"
-            self.dispatches[key] = dict(reference=ref, body=b, mailbox=self.active_boxes(t)[0]["public_reference"])
+            self.dispatches[key] = dict(
+                reference=ref, body=b, mailbox=self.active_boxes(t)[0]["public_reference"],
+                state="queued", messages=[], created_at="2026-01-01T12:00:00Z", updated_at="2026-01-01T12:00:00Z",
+            )
             return httpx.Response(202, json={"accepted": True, "mailing_agent_reference": ref})
+
+        if call.method == "GET" and call.path.startswith(CONVERSATION_PREFIX) and call.path.endswith("/conversation"):
+            key = call.path[len(CONVERSATION_PREFIX):-len("/conversation")]
+            try:
+                limit = int(request.url.params.get("limit", "20"))
+            except ValueError:
+                limit = -1
+            if not 1 <= limit <= 50:
+                return httpx.Response(422, json={"detail": "invalid limit"})
+            rec = self.dispatches.get((t, key))
+            if rec is None:
+                return httpx.Response(404, json={"detail": "Outreach action not found"})
+            return httpx.Response(200, json=self._conversation_out(rec, limit))
 
         return httpx.Response(404, json={"detail": "no such route"})
 
@@ -172,6 +195,38 @@ class FakeMailer:
         m = self.mailboxes[ref]
         return {k: m[k] for k in ("public_reference", "email_address", "status", "smtp_host", "smtp_port",
                                   "smtp_use_tls", "smtp_username")}
+
+    def _conversation_out(self, rec: dict, limit: int) -> dict:
+        msgs = rec["messages"]
+        window = msgs[-limit:]
+        out = []
+        for m in window:
+            outbound = m["direction"] == "outbound"
+            out.append(dict(
+                direction=m["direction"], message_type="initial_outreach" if outbound else None,
+                subject=m["subject"], body=m["body"], body_truncated=False, created_at=m["created_at"],
+                delivery_state=rec["state"] if outbound else None,
+                mailing_agent_reference=rec["reference"] if outbound else None,
+                mailbox_reference=rec["mailbox"],
+            ))
+        return {
+            "action": {"accepted": True, "state": rec["state"], "mailing_agent_reference": rec["reference"],
+                       "created_at": rec["created_at"], "updated_at": rec["updated_at"], "mailbox_reference": rec["mailbox"]},
+            "messages": out,
+            "has_more": len(msgs) > limit,
+        }
+
+    # ---- conversation scripting (C9.3) -----------------------------------
+    def dispatch_record(self, tenant: str, idempotency_key: str) -> dict:
+        return self.dispatches[(tenant, idempotency_key)]
+
+    def set_dispatch_state(self, tenant: str, idempotency_key: str, state: str):
+        self.dispatch_record(tenant, idempotency_key)["state"] = state
+
+    def add_message(self, tenant: str, idempotency_key: str, *, direction: str, body: str,
+                    subject: Optional[str] = "Quick question", created_at: str = "2026-01-01T12:00:00Z"):
+        self.dispatch_record(tenant, idempotency_key)["messages"].append(
+            dict(direction=direction, body=body, subject=subject, created_at=created_at))
 
     # ---- wiring ----------------------------------------------------------
     def install(self, monkeypatch, mc) -> "FakeMailer":
