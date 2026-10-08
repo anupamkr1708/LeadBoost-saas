@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { QualificationBadge } from "@/components/shared/status-badge";
+import { MailerStatePanel } from "@/components/outreach/mailer-state-panel";
 import { useUpdateLead } from "@/features/leads/hooks";
 import { useEmailAccounts } from "@/features/email-accounts/hooks";
 import {
@@ -252,6 +253,12 @@ export function OutreachCard({ lead }: { lead: Lead }) {
           </p>
         )}
       </div>
+
+      {/* C9.3: read-only Mailing Agent delivery state + conversation. Only once a hand-off has
+          been attempted (the backend also won't ask the Mailing Agent before that). */}
+      {activeAction && activeAction.dispatch_attempts > 0 && (
+        <MailerStatePanel actionId={activeAction.id} leadboostState={activeAction.state} />
+      )}
     </Card>
   );
 }

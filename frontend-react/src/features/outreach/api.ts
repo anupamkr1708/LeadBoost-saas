@@ -2,6 +2,7 @@ import { apiClient } from "@/lib/api-client";
 import type {
   OutreachAction,
   OutreachActionCreatePayload,
+  OutreachMailerState,
   OutreachPolicy,
   OutreachPolicyUpdatePayload,
 } from "@/types/api";
@@ -24,6 +25,10 @@ export const outreachApi = {
 
   get: (actionId: number) =>
     apiClient.get<OutreachAction>(`/api/v2/outreach-actions/${actionId}`).then((r) => r.data),
+
+  /** C9.3 -- read-only. The Mailing Agent is reached by the LeadBoost backend, never by the browser. */
+  getMailerState: (actionId: number) =>
+    apiClient.get<OutreachMailerState>(`/api/v2/outreach-actions/${actionId}/mailer-state`).then((r) => r.data),
 
   create: (payload: OutreachActionCreatePayload) =>
     apiClient.post<OutreachAction>("/api/v2/outreach-actions", payload).then((r) => r.data),

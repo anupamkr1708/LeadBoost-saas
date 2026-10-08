@@ -63,6 +63,46 @@ mailbox**; zero or several ⇒ `409`.
 * Identity is `(organization, email_address)`; `email_address` is sent only on create. Provisioning is
   idempotent: create → on `409` list and adopt by e-mail → activate.
 
+## 3. Delivery state and conversation — read-only (C9.3)
+
+LeadBoost authorizes; the Mailer generates, sends, receives and owns the communication record. So that the
+dashboard can show the **actual** message and what happened to it (rather than LeadBoost's own snapshot), the
+LeadBoost **backend** reads one Mailer endpoint. The browser never does: it calls only LeadBoost's
+`GET /api/v2/outreach-actions/{action_id}/mailer-state`, and never receives the Mailer's URL, key, key map, paths,
+references or schema.
+
+```
+Mailer   GET /integrations/leadboost/outreach-actions/{idempotency_key}/conversation?limit=20   (1..50)
+LeadBoost GET /api/v2/outreach-actions/{action_id}/mailer-state      (customer-facing; same auth/org rules as the other outreach routes)
+```
+
+* **Rooted on the action's `idempotency_key`** (the same key dispatch forwarded; unique per organization; still works if the
+  dispatch response was lost). The Mailer tenant comes only from the API key — nothing in the request names one. The key is
+  percent-encoded with `safe=""` (keys are caller-suppliable and may contain `/`).
+* **A conversation is per recipient, not per action.** There is no Thread. It is the recipient's Contact and its messages, so
+  several actions to the same address share one conversation; each outbound message carries *its own* dispatch's state.
+* **State is the dispatch's.** `action.state` and each outbound `delivery_state` are `ExternalDispatch.state`
+  (`queued|sending|sent|failed|unknown`; the Mailer's internal `generating` reads as `queued`). `unknown` means *delivery
+  unconfirmed* — not failure; it is never translated and the UI says not to resend. `Message.status` is never consulted.
+* **Which messages.** Outbound: those produced by this organization's dispatches for this recipient. Inbound: only rows
+  received through a **mailbox that belongs to this organization**. Inbound with no provable mailbox owner (the webhook and
+  the legacy deployment-global IMAP poll) is **excluded**; closing that provenance gap is separate security work.
+* **Bounded.** The most recent `limit` messages, oldest first, `has_more` when older ones exist. No cursor. Each body is capped
+  at 20 000 characters (`body_truncated`). Inbound text is third-party-controlled: it is data, rendered as **plain text**.
+* **Not exposed by the Mailer:** database ids, RFC `Message-ID`/`In-Reply-To`/`References`, `error_message`, intent or
+  analysis fields, grounding, claim/lease data, mailbox addresses or credentials, the organization.
+* **Strict on our side.** The response is parsed with closed models (`extra="forbid"`, Literal enums, strict scalars,
+  bounded sizes, "outbound ⇔ has `delivery_state`"). Any drift is `mailing_agent_invalid_response` — never passed through.
+* **The LeadBoost response** is a product view, not a pass-through: `availability`
+  (`available | not_dispatched | not_found_at_mailer | mailer_unavailable`), a closed `error_code` (only with
+  `mailer_unavailable`) and `mailer` (delivery state, `updated_at`, messages, `has_more`). Mailer references and mailbox
+  references are dropped. Mailer-side 404 / timeout / 5xx / bad schema are reported there with HTTP 200 — never as a false
+  success and never as raw error text. HTTP 404 means only that the LeadBoost action is not in the caller's organization.
+  The Mailer is not asked while `dispatch_attempts == 0` (`not_dispatched`).
+* **Read-only, both sides.** No write, lock, claim, retry, queue item, SMTP/IMAP or LLM call. LeadBoost never changes an
+  `OutreachAction` in response: if LeadBoost says `DISPATCH_FAILED` and the Mailer says `sent`, **both are shown** and
+  nothing is healed (that is a deliberate, separate, later reconciliation concern).
+
 ## Known limitations (deliberate, documented — not hidden)
 * **Snapshot ≠ delivered text.** `OutreachAction.subject/body` is LeadBoost's *legacy snapshot* (what was
   authorized/reviewed). The integrated path delivers the **Mailer's own generated `Message`**. The two are
@@ -76,4 +116,5 @@ mailbox**; zero or several ⇒ `409`.
   next reconcile*, is not contacted (never provisioned ⇒ nothing to disable); it is adopted by e-mail the next time
   the account is activated, and until then a second ACTIVE mailbox makes the Mailer answer `409` (fail closed).
 * Deferred: implicit TLS (`SMTP_SSL`), automated tenant-key provisioning, `display_name` in the Mailer, IMAP /
-  inbound (M3), bilateral reconciliation (C9.3), removing LeadBoost's own encrypted credential.
+  inbound (M3), removing LeadBoost's own encrypted credential; **healing** LeadBoost's `DISPATCH_FAILED` from the Mailer's
+  state (C9.3 only *displays* it).
