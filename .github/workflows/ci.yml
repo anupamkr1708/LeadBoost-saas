@@ -224,9 +224,9 @@ jobs:
   cross-service-e2e:
     # C9.3: LeadBoost's real API + client against the REAL Mailer Agent, run as a separate process.
     # The two services pin mutually incompatible dependencies (e.g. `cryptography`), so each gets its
-    # own virtualenv -- as in production, they never share an interpreter. Needs the Mailer revision
-    # that contains the C9.3 conversation endpoint: merge the Mailer change first (or point `ref`
-    # at its branch while both PRs are open).
+    # own virtualenv -- as in production, they never share an interpreter. The Mailer checkout is
+    # pinned to an exact revision so this job cannot change under an unrelated Mailer commit; bump
+    # `ref` deliberately when the contract under test changes.
     name: Cross-service E2E (LeadBoost <-> Mailer)
     runs-on: ubuntu-latest
     steps:
@@ -235,7 +235,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: anupamkr1708/LeadBoost-mail-agent
-          ref: main
+          # Mailer main at the C9.3 merge (PR #13); C12 adds Mailer tests only, no Mailer runtime change.
+          ref: e19f75006e31146c4b0ebfee147fd9c1d375e8a1
           path: mailer-agent
 
       - uses: actions/setup-python@v5

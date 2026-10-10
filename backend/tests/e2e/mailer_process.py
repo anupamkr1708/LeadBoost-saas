@@ -113,7 +113,9 @@ class MailerProcess:
                     "--port",
                     str(self.port),
                     "--log-level",
-                    "warning",
+                    # "info" (not "warning") so uvicorn's access log records each request's
+                    # method/path/status: tests assert what the Mailer itself answered (requests_seen).
+                    "info",
                 ],
                 cwd=self.repo,
                 env=env,
@@ -142,6 +144,23 @@ class MailerProcess:
             except subprocess.TimeoutExpired:
                 self._proc.kill()
         self.tmp.cleanup()
+
+    def requests_seen(self, path_fragment: str) -> List[tuple]:
+        """(method, status) of every request the Mailer served whose path contains `path_fragment`,
+        in order, read from its access log."""
+        import re
+
+        pattern = re.compile(r'"(?P<method>[A-Z]+) (?P<path>\S+) HTTP/[\d.]+" (?P<status>\d{3})')
+        seen: List[tuple] = []
+        try:
+            text = open(self._log, errors="replace").read()
+        except OSError:
+            return seen
+        for line in text.splitlines():
+            m = pattern.search(line)
+            if m and path_fragment in m.group("path"):
+                seen.append((m.group("method"), int(m.group("status"))))
+        return seen
 
     def log_tail(self, n: int = 2000) -> str:
         try:

@@ -21,6 +21,7 @@ import asyncio
 import json
 import os
 import uuid
+from urllib.parse import quote
 
 import httpx
 import pytest
@@ -304,6 +305,81 @@ def test_mailer_side_failures_over_real_http_are_safe_and_never_a_false_success(
 
 
 # ------------------------------------------------------------------------------------------
+def test_wrong_org_key_is_a_real_mailer_401_mapped_to_a_closed_product_state_and_mutates_nothing(
+    client, mailer_server, env, monkeypatch
+):
+    a = env(client, "e2e_wk_a", "e2e-key-a")
+    b = env(client, "e2e_wk_b", "e2e-key-b")
+    aid_a, key_a = _dispatched(client, a)
+    aid_b, key_b = _dispatched(client, b)
+    mailer_server.worker_generated_and_resolved(key_a, subject="s", body="ORG-A-GENERATED-TEXT", state="sent")
+    mailer_server.worker_generated_and_resolved(key_b, subject="s", body=GENERATED, state="sent")
+
+    def conversation_reads(idem_key):
+        # the idempotency key contains ":" and is logged percent-encoded
+        seen = mailer_server.requests_seen(f"/{quote(idem_key, safe='')}/conversation")
+        return [status for method, status in seen if method == "GET"]
+
+    # baseline: with the right per-org keys both orgs read their own state; the Mailer answered 200
+    assert _state(client, a, aid_a).json()["availability"] == "available"
+    assert _state(client, b, aid_b).json()["availability"] == "available"
+    assert conversation_reads(key_a) == [200] and conversation_reads(key_b) == [200]
+
+    row_a, row_b = _action_row(aid_a), _action_row(aid_b)
+    mailer_before = mailer_server.dump()
+
+    # org A is configured with a WRONG key; org B keeps its correct one (per-org key selection)
+    wrong = "not-the-key-" + uuid.uuid4().hex
+    monkeypatch.setenv("MAILING_AGENT_ORG_API_KEYS", json.dumps({str(a.org): wrong, str(b.org): "e2e-key-b"}))
+
+    bad_a = _state(client, a, aid_a)
+    ok_b = _state(client, b, aid_b)
+
+    # the Mailer itself rejected org A's request (real HTTP 401), and served org B's with 200
+    assert conversation_reads(key_a) == [200, 401]
+    assert conversation_reads(key_b) == [200, 200]
+
+    # LeadBoost maps that to its closed product-level state, not an error page
+    assert bad_a.status_code == 200
+    assert bad_a.json() == {
+        "availability": "mailer_unavailable",
+        "error_code": "mailing_agent_rejected",
+        "mailer": None,
+    }
+    assert ok_b.json()["availability"] == "available" and ok_b.json()["mailer"]["delivery_state"] == "sent"
+
+    # no raw Mailer text, keys, URL or conversation content reaches the browser
+    raw_401 = httpx.get(
+        f"{mailer_server.base_url}/integrations/leadboost/outreach-actions/{key_a}/conversation",
+        headers={"X-API-Key": wrong},
+    )
+    assert raw_401.status_code == 401
+    mailer_detail = str(raw_401.json().get("detail", ""))
+    assert mailer_detail
+    for leaked in (
+        mailer_detail,
+        wrong,
+        "e2e-key-a",
+        "e2e-key-b",
+        mailer_server.base_url,
+        "401",
+        "tenant-a",
+        key_a,
+        "ORG-A-GENERATED-TEXT",
+    ):
+        assert leaked not in bad_a.text
+
+    # nothing was mutated on either side by the rejected read
+    assert _action_row(aid_a) == row_a and _action_row(aid_b) == row_b
+    assert mailer_server.dump() == mailer_before
+
+    # restoring the key restores the view: the failure was transient configuration, not state
+    monkeypatch.setenv(
+        "MAILING_AGENT_ORG_API_KEYS", json.dumps({str(a.org): "e2e-key-a", str(b.org): "e2e-key-b"})
+    )
+    assert _state(client, a, aid_a).json()["availability"] == "available"
+
+
 def _shape(value):
     """Structure of a JSON document: keys at every level, and the JSON type of each leaf."""
     if isinstance(value, dict):
