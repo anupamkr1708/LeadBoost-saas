@@ -42,8 +42,20 @@ def _free_port() -> int:
 
 
 class MailerProcess:
-    def __init__(self, repo: str, python: str):
+    def __init__(
+        self,
+        repo: str,
+        python: str,
+        *,
+        database_url: Optional[str] = None,
+        extra_env: Optional[Dict[str, str]] = None,
+    ):
+        """`database_url` / `extra_env` are for the continuous lifecycle test only (a disposable
+        PostgreSQL instead of the throwaway SQLite file). The default behaviour is unchanged."""
         self.repo, self.python = repo, python
+        self.database_url = database_url
+        self.extra_env = dict(extra_env or {})
+        self.process_env: Dict[str, str] = {}  # the Mailer's effective configuration, set by start()
         self.tmp = tempfile.TemporaryDirectory(prefix="mailer-e2e-")
         self.db_path = os.path.join(self.tmp.name, "mailer.db")
         self.port = _free_port()
@@ -55,7 +67,7 @@ class MailerProcess:
     def _env(self) -> Dict[str, str]:
         env = {k: v for k, v in os.environ.items() if k not in ("DATABASE_URL", "PYTHONPATH")}
         env.update(
-            DATABASE_URL=f"sqlite:///{self.db_path}",
+            DATABASE_URL=self.database_url or f"sqlite:///{self.db_path}",
             ORG_KEY_MAP=json.dumps(KEYS),
             RUN_SCHEDULER_IN_PROCESS="false",
             LIVE_SENDING_ENABLED="false",
@@ -73,6 +85,7 @@ class MailerProcess:
                 check=True,
             ).stdout.strip(),
         )
+        env.update(self.extra_env)
         return env
 
     def start(self) -> "MailerProcess":
@@ -89,6 +102,7 @@ class MailerProcess:
                 f"cannot import mailer_agent with {self.python!r} in {self.repo!r}"
             ) from exc
         env = self._env()
+        self.process_env = dict(env)
         subprocess.run(
             [
                 self.python,
