@@ -46,13 +46,43 @@ has minimal friction.
 | `REFRESH_TOKEN_EXPIRE_DAYS` | `7` | |
 | `ALLOWED_ORIGINS` | *(required in prod)* | CORS allowlist, comma-separated. |
 
+## Mailer integration (active; read from the process environment by `core/infrastructure/mailing_agent/client.py`)
+
+| Variable | Required | Notes |
+|---|---|---|
+| `MAILING_AGENT_BASE_URL` | yes, for any dispatch | Deployed Mailer API base URL. `https://` only (plain `http://` is accepted for loopback hosts only; anything else fails closed with `INSECURE_TRANSPORT`). Unset -> `NOT_CONFIGURED`. |
+| `MAILING_AGENT_ORG_API_KEYS` | yes, for any dispatch | **Secret.** JSON object `{"<leadboost_org_id>": "<mailer_api_key>"}`, one key per LeadBoost organization. The Mailer's `ORG_KEY_MAP` is the inverse (`{"<key>": "<org_id>"}`); the two must agree. A missing organization -> `AUTH_NOT_CONFIGURED`; invalid JSON / non-object -> logged, no keys usable. |
+| `MAILING_AGENT_TIMEOUT_SECONDS` | no | Positive number; default `15`. |
+
+`MAILER_AGENT_BASE_URL` and `MAILING_AGENT_API_KEY` are not read anywhere.
+
+## Background job loop (in-process; `application/execution/worker_loop.py`)
+
+| Variable | Default | Notes |
+|---|---|---|
+| `JOB_WORKER_ENABLED` | `true` | `false`/`0`/`no` disables the loop. Leave enabled on the single web service: it runs the durable `LEAD_PIPELINE` jobs `POST /leads` creates. |
+| `JOB_WORKER_CONCURRENCY` | `3` | Minimum 1. Memory risk on ~512 MB alongside Playwright; change only on evidence. |
+| `JOB_POLL_INTERVAL_SECONDS` | `2` | Minimum `0.5`. |
+
+## Credential encryption
+
+| Variable | Required | Notes |
+|---|---|---|
+| `EMAIL_CREDENTIAL_ENCRYPTION_KEY` | yes, to store email-account credentials | **Secret** Fernet key (`core/infrastructure/security/credential_crypto.py`), validated on every use. Keep it stable: changing or losing it makes stored credentials unreadable. |
+
+## Frontend (build-time, set in Vercel -- not read by the backend)
+
+| Variable | Notes |
+|---|---|
+| `NEXT_PUBLIC_API_URL` | Backend `https://` URL baked into the bundle at build time; defaults to `http://localhost:8000` when unset. |
+
 ## Application
 
 | Variable | Default | Notes |
 |---|---|---|
 | `ENVIRONMENT` | `development` | Set to `production` to enable the startup validation described above. |
 | `LOG_LEVEL` | `INFO` | |
-| `FRONTEND_URL` | `http://localhost:5173` | |
+| `FRONTEND_URL` | `http://localhost:5173` | Consumed only by the dormant Stripe return-URL code; not needed for the current deployment flow. |
 | `SENDER_ORG` | `Our Company` | **Fallback only.** Outreach now personalizes to each organization's own name (its profile in the database) first; this is used only for organizations that haven't set one. |
 | `LLM_MODEL` | `llama-3.3-70b-versatile` | Groq model used by the LangGraph pipeline's LLM-backed stages. |
 | `REVIEW_AUTO_APPROVE_THRESHOLD` | `0.75` | |
