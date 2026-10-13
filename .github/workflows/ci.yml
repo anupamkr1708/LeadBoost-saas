@@ -10,13 +10,15 @@ on:
   pull_request:
     branches: [main, develop]
 
+# Runners are pinned to ubuntu-24.04 rather than ubuntu-latest: GitHub is migrating `ubuntu-latest` to
+# Ubuntu 26.04 between 2026-10-19 and 2026-11-19. Move to the newer image deliberately, after testing.
 env:
   PYTHON_VERSION: "3.12"
 
 jobs:
   python-quality:
     name: Python formatting, lint, type-check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: backend
@@ -58,7 +60,7 @@ jobs:
 
   migrations:
     name: PostgreSQL migration validation
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Additive alongside backend-tests (which stays SQLite-only, unchanged)
     # -- this job validates the actual Alembic/PostgreSQL path P1.1 adds:
     # a fresh-database upgrade, the baseline revision's own no-drop
@@ -138,7 +140,7 @@ jobs:
 
   backend-tests:
     name: Backend unit tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: backend
@@ -227,8 +229,14 @@ jobs:
     # own virtualenv -- as in production, they never share an interpreter. The Mailer checkout is
     # pinned to an exact revision so this job cannot change under an unrelated Mailer commit; bump
     # `ref` deliberately when the contract under test changes.
+    # The pinned Mailer revision deliberately INCLUDES the C15 security hardening (fail-closed API
+    # authentication, tenant-scoped inbound handling). This job covers the cross-service contract:
+    # the Mailer must start with an explicit ORG_KEY_MAP (the harness does not set the legacy
+    # API_KEY), a wrong key gets a real 401, cross-tenant reads are refused, and an IMAP-polled reply
+    # binds to the right tenant's mailbox/dispatch. It does NOT call /webhooks/inbound-email; the
+    # detailed C15.1b foreign-thread / shared-sender regressions are covered by the Mailer's own CI.
     name: Cross-service E2E (LeadBoost <-> Mailer)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     services:
       # Disposable PostgreSQL for the Mailer in the continuous lifecycle test only (the Mailer's own
       # database; LeadBoost keeps its SQLite file). The test refuses any other database name.
@@ -251,8 +259,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: anupamkr1708/LeadBoost-mail-agent
-          # Mailer main at the C9.3 merge (PR #13); C12 adds Mailer tests only, no Mailer runtime change.
-          ref: e19f75006e31146c4b0ebfee147fd9c1d375e8a1
+          # Mailer main at the C15 merge (PR #16: C15.1 fail-closed auth + C15.1b tenant-scoped inbound
+          # webhook). Previously pinned to the C9.3 merge (e19f750, PR #13), which predates C15.
+          ref: 798e858ac80cf096c4ee7a311d85da9481ddc10d
           path: mailer-agent
 
       - uses: actions/setup-python@v5
@@ -311,7 +320,7 @@ jobs:
 
   security-scan:
     name: Dependency security scan
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: backend
@@ -336,7 +345,7 @@ jobs:
 
   docker-build:
     name: Docker build validation
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
@@ -355,7 +364,7 @@ jobs:
 
   frontend:
     name: Frontend lint & build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # This backend repository doesn't include frontend source, so this
     # job no-ops gracefully rather than failing when ../frontend or a
     # sibling frontend/ directory isn't present -- wire the real
