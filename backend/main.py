@@ -247,7 +247,9 @@ async def health_check(db: Session = Depends(get_db)):
         health_status["checks"]["database"] = "healthy"
     except Exception as e:
         logger.error(f"Database health check failed: {e}")
-        health_status["checks"]["database"] = f"unhealthy: {str(e)}"
+        # Exception text (host, port, user, driver detail) is logged above for operators, never returned:
+        # /health is unauthenticated.
+        health_status["checks"]["database"] = "unhealthy"
         is_healthy = False
 
     # Check Redis
@@ -260,7 +262,7 @@ async def health_check(db: Session = Depends(get_db)):
         health_status["checks"]["redis"] = "healthy"
     except Exception as e:
         logger.error(f"Redis health check failed: {e}")
-        health_status["checks"]["redis"] = f"unhealthy: {str(e)}"
+        health_status["checks"]["redis"] = "unhealthy"
         is_healthy = False
 
     if not is_healthy:
@@ -286,7 +288,8 @@ async def readiness_check(db: Session = Depends(get_db)):
         logger.error(f"Readiness check failed: {e}")
         return JSONResponse(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            content={"status": "not ready", "error": str(e)}
+            # Static message only: /ready is unauthenticated, so the exception text stays in the log.
+            content={"status": "not ready", "error": "database unavailable"}
         )
 
 
