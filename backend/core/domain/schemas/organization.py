@@ -19,9 +19,10 @@ class OrganizationCreate(OrganizationBase):
 class OrganizationUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
-    plan_tier: Optional[str] = None
-    max_users: Optional[int] = None
-    max_leads: Optional[int] = None
+    # NOTE: plan_tier / max_users / max_leads are deliberately NOT updatable here. They describe the
+    # organization's entitlements, which must only change through the billing flow (see
+    # api/endpoints/billing.py::upgrade_plan), never through a tenant-editable profile update.
+    # Clients that still send them get 200 and the values are ignored (extra fields are dropped).
     # P1.2 (Company Profile): minimal extension, see
     # core/domain/models/organization.py for why these live directly on
     # Organization rather than a separate CompanyProfile table.
