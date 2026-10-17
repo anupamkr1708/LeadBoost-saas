@@ -12,10 +12,12 @@ deployments that talk only over HTTP; no code, model, ORM class or encryption ke
 * Header `X-API-Key: <key>`. **Mailer is the tenant authority**: it maps the key to its
   organization (`ORG_KEY_MAP`, `{"<key>":"<org_id>"}`). LeadBoost never sends an organization id
   in a body and nothing in a body is used for authorization.
-* LeadBoost holds **one key per LeadBoost organization**:
+* LeadBoost holds **one distinct key per LeadBoost organization**:
   `MAILING_AGENT_ORG_API_KEYS={"<leadboost_org_id>":"<mailer_api_key>"}`. No key for the org ⇒
-  fail closed (`mailing_agent_auth_not_configured`). A single shared key is not supported — it
-  would collapse every customer into one Mailer organization. `MAILING_AGENT_API_KEY` is no longer read.
+  fail closed (`mailing_agent_auth_not_configured`). Duplicate values are not rejected by the
+  current client, so operators must ensure every LeadBoost organization maps to a unique Mailer
+  API key; a duplicate can cause multiple LeadBoost organizations to authenticate as the same
+  Mailer tenant. `MAILING_AGENT_API_KEY` is no longer read.
 * `MAILING_AGENT_BASE_URL` must be `https://` (or `http://` to loopback only). Redirects are not followed.
 * Operator provisions the per-org keys; automated tenant-key provisioning is deferred.
 

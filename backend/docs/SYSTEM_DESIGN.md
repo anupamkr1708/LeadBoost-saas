@@ -51,7 +51,7 @@ Mailer is the **communication plane**. The browser talks to LeadBoost only.
 `POST /api/v2/discovery/search` runs, in the request, as an inline `DISCOVERY` job (a durable `jobs` row that is
 created and executed immediately):
 
-1. **Parse** the query with a deterministic, regex-based parser (no LLM). Unparseable ⇒ HTTP 400.
+1. **Parse** the query with a deterministic, regex-based parser (no LLM). An unparseable query raises HTTP 422 Unprocessable Entity (`HTTP_422_UNPROCESSABLE_ENTITY`) through the endpoint's `QueryParseError` handler.
 2. **Search.** Overpass (OpenStreetMap) is always tried first. Only when it returns zero candidates does a
    general web-search provider (Serper) run, for *any* category, because map data misses SaaS companies,
    agencies and freelancers.

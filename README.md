@@ -262,7 +262,7 @@ cp .env.example .env.local     # set NEXT_PUBLIC_API_URL to your backend
 npm run dev                    # http://localhost:3000
 ```
 
-**Unit tests.** This selects the same tests as the CI job "Backend unit tests", with the same environment:
+**Unit tests.** This selects the same test paths as the CI job "Backend unit tests", but the local environment is not identical. CI additionally installs Chromium and its system dependencies using `playwright install --with-deps chromium`:
 
 ```bash
 cd backend
