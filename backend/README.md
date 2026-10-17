@@ -40,9 +40,13 @@ uvicorn main:app --reload
 
 | Guide | Covers |
 |---|---|
-| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Pipeline execution lifecycle, observability, explainability |
-| [`docs/DISCOVERY.md`](docs/DISCOVERY.md) | The discovery pipeline in depth: query parsing, search, website resolution/validation, ranking |
-| [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | Deploying to Render (backend) + Vercel (frontend), plus the optional self-hosted/VPS path |
+| [`docs/README.md`](docs/README.md) | Index of every document below |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Canonical architecture overview: components, boundaries, ownership |
+| [`docs/SYSTEM_DESIGN.md`](docs/SYSTEM_DESIGN.md) | End-to-end design, failure model, trade-offs |
+| [`docs/MAILER_INTEGRATION.md`](docs/MAILER_INTEGRATION.md) | The LeadBoost ⇄ Mailer Agent contract |
+| [`docs/DISCOVERY.md`](docs/DISCOVERY.md) | The discovery pipeline in depth |
+| [`docs/OBSERVABILITY_AND_METRICS.md`](docs/OBSERVABILITY_AND_METRICS.md) | Pipeline execution lifecycle, observability, explainability |
+| [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | Intended topology, configuration, migrations, release and rollback |
 | [`docs/DOCKER.md`](docs/DOCKER.md) | Dockerfile, docker-compose (dev and prod), image layout |
 | [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md) | Every environment variable: required vs. optional, defaults, what degrades if unset |
 | [`docs/MONITORING.md`](docs/MONITORING.md) | Prometheus metrics, the bundled Grafana dashboard, what each panel means |
@@ -51,8 +55,15 @@ uvicorn main:app --reload
 
 ```bash
 pip install pytest pytest-asyncio
-pytest tests/ --ignore=tests/scraper
+export DATABASE_URL="sqlite:///./ci_test.db" ENVIRONMENT=development
+export SECRET_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
+pytest tests/ discovery_eval/tests/ --ignore=tests/scraper
 ```
+
+This is the test selection and environment of the CI job "Backend unit tests" (`.github/workflows/ci.yml`),
+which additionally installs Chromium with `playwright install --with-deps chromium`. Cross-service tests in
+`tests/e2e/` skip themselves unless `MAILER_REPO_PATH` points at a Mailer checkout; CI runs them in a separate job
+with the Mailer, Dovecot and a disposable PostgreSQL database.
 
 (`tests/scraper/` contains standalone verification scripts meant to be
 run directly with `python`, not collected by pytest -- see that
@@ -66,4 +77,4 @@ checkout itself is intentionally not wired up yet -- see
 `docs/ENVIRONMENT.md`), discovery, website resolution/validation,
 duplicate detection, lead qualification, outreach generation, and
 analytics are all implemented and covered by the test suite. See
-`docs/ARCHITECTURE.md` and `docs/DISCOVERY.md` for how each piece works.
+`docs/ARCHITECTURE.md`, `docs/SYSTEM_DESIGN.md` and `docs/DISCOVERY.md` for how each piece works.

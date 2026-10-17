@@ -1,0 +1,119 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 790" width="1100" height="790" role="img" aria-labelledby="t d" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+<title id="t">LeadBoost outreach action state machine and Mailer dispatch state machine</title><desc id="d">Two independently owned state machines drawn separately. LeadBoost owns authorization and handoff: pending_review, approved, dispatching, submitted, dispatch_failed, cancelled. The Mailer owns dispatch and delivery: queued, generating (internal), sending, sent, failed, unknown. LeadBoost reads the Mailer state read-only and never writes it back.</desc>
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#374151"/></marker><marker id="as" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#374151"/></marker><marker id="w" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#B45309"/></marker><marker id="ws" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#B45309"/></marker><marker id="e" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#B91C1C"/></marker><marker id="es" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#B91C1C"/></marker></defs>
+<rect width="1100" height="790" fill="#FFFFFF"/>
+<text x="10" y="26" font-size="16" font-weight="700" fill="#111827" text-anchor="start">Two state machines, two owners</text>
+<text x="10" y="44" font-size="12" font-weight="400" fill="#4B5563" text-anchor="start">Never one combined lifecycle. Heavy outline = terminal. Dashed outline = machine-only or internal.</text>
+<rect x="10" y="60" width="1080" height="270" rx="12" fill="#FFFFFF" stroke="#2563EB" stroke-width="2"/>
+<path d="M10,72 a12,12 0 0 1 12,-12 h1056 a12,12 0 0 1 12,12 v14 h-1080 z" fill="#DBEAFE" stroke="none"/>
+<line x1="10" y1="86" x2="1090" y2="86" stroke="#2563EB" stroke-width="1"/>
+<text x="22" y="78" font-size="13" font-weight="700" fill="#1E3A8A" text-anchor="start">LeadBoost: OutreachAction (authorization and handoff)</text>
+<text x="1078" y="78" font-size="11.5" font-weight="400" fill="#1E3A8A" text-anchor="end">owner: LeadBoost</text>
+<rect x="40" y="110" width="150" height="46" rx="10" fill="#FFFFFF" stroke="#2563EB" stroke-width="1.6"/>
+<text x="115.0" y="138" font-size="13" font-weight="700" fill="#1E3A8A" text-anchor="middle">pending_review</text>
+<rect x="260" y="110" width="130" height="46" rx="10" fill="#FFFFFF" stroke="#2563EB" stroke-width="1.6"/>
+<text x="325.0" y="138" font-size="13" font-weight="700" fill="#1E3A8A" text-anchor="middle">approved</text>
+<rect x="470" y="110" width="150" height="46" rx="10" fill="#FFFFFF" stroke="#2563EB" stroke-width="1.6" stroke-dasharray="5 3"/>
+<text x="545.0" y="130" font-size="13" font-weight="700" fill="#1E3A8A" text-anchor="middle">dispatching</text>
+<text x="545.0" y="146" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="middle">machine-only claim</text>
+<rect x="700" y="110" width="130" height="46" rx="10" fill="#FFFFFF" stroke="#2563EB" stroke-width="3"/>
+<text x="765.0" y="138" font-size="13" font-weight="700" fill="#1E3A8A" text-anchor="middle">submitted</text>
+<rect x="470" y="240" width="150" height="46" rx="10" fill="#FFFFFF" stroke="#B91C1C" stroke-width="1.6"/>
+<text x="545.0" y="260" font-size="13" font-weight="700" fill="#7F1D1D" text-anchor="middle">dispatch_failed</text>
+<text x="545.0" y="276" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="middle">retry-eligible</text>
+<rect x="200" y="240" width="150" height="46" rx="10" fill="#FFFFFF" stroke="#2563EB" stroke-width="3"/>
+<text x="275.0" y="268" font-size="13" font-weight="700" fill="#1E3A8A" text-anchor="middle">cancelled</text>
+<path d="M190,133 L260,133" fill="none" stroke="#374151" stroke-width="1.6" marker-end="url(#a)"/>
+<rect x="198.0" y="111.0" width="54.0" height="18" rx="4" fill="#FFFFFF" fill-opacity="0.94"/>
+<text x="225.0" y="124.0" font-size="11.5" font-weight="500" fill="#111827" text-anchor="middle">approve</text>
+<path d="M390,133 L470,133" fill="none" stroke="#374151" stroke-width="1.6" marker-end="url(#a)"/>
+<rect x="402.0" y="111.0" width="56.0" height="18" rx="4" fill="#FFFFFF" fill-opacity="0.94"/>
+<text x="430.0" y="124.0" font-size="11.5" font-weight="500" fill="#111827" text-anchor="middle">dispatch</text>
+<path d="M620,133 L700,133" fill="none" stroke="#374151" stroke-width="1.6" marker-end="url(#a)"/>
+<rect x="626.0" y="111.0" width="68.0" height="18" rx="4" fill="#FFFFFF" fill-opacity="0.94"/>
+<text x="660.0" y="124.0" font-size="11.5" font-weight="500" fill="#111827" text-anchor="middle">Mailer 202</text>
+<path d="M545,156 L545,240" fill="none" stroke="#B91C1C" stroke-width="1.6" marker-end="url(#e)"/>
+<rect x="451.0" y="189.0" width="84.0" height="18" rx="4" fill="#FFFFFF" fill-opacity="0.94"/>
+<text x="493.0" y="202.0" font-size="11.5" font-weight="500" fill="#B91C1C" text-anchor="middle">not accepted</text>
+<path d="M585,240 L585,156" fill="none" stroke="#374151" stroke-width="1.6" marker-end="url(#a)"/>
+<rect x="589.0" y="189.0" width="100.0" height="18" rx="4" fill="#FFFFFF" fill-opacity="0.94"/>
+<text x="639.0" y="202.0" font-size="11.5" font-weight="500" fill="#111827" text-anchor="middle">retry, same key</text>
+<path d="M115,156 L115,263 L200,263" fill="none" stroke="#374151" stroke-width="1.6" marker-end="url(#a)"/>
+<rect x="64.0" y="200.5" width="48.0" height="18" rx="4" fill="#FFFFFF" fill-opacity="0.94"/>
+<text x="88.0" y="213.5" font-size="11.5" font-weight="500" fill="#111827" text-anchor="middle">cancel</text>
+<path d="M325,156 L325,240" fill="none" stroke="#374151" stroke-width="1.6" marker-end="url(#a)"/>
+<rect x="329.0" y="189.0" width="48.0" height="18" rx="4" fill="#FFFFFF" fill-opacity="0.94"/>
+<text x="353.0" y="202.0" font-size="11.5" font-weight="500" fill="#111827" text-anchor="middle">cancel</text>
+<path d="M470,263 L350,263" fill="none" stroke="#374151" stroke-width="1.6" marker-end="url(#a)"/>
+<rect x="386.0" y="241.0" width="48.0" height="18" rx="4" fill="#FFFFFF" fill-opacity="0.94"/>
+<text x="410.0" y="254.0" font-size="11.5" font-weight="500" fill="#111827" text-anchor="middle">cancel</text>
+<rect x="870" y="96" width="210" height="228" rx="6" fill="#EFF6FF" stroke="#2563EB" stroke-width="1.4" stroke-dasharray="5 3"/>
+<text x="880" y="114" font-size="12" font-weight="700" fill="#1E3A8A" text-anchor="start">Rules</text>
+<text x="880" y="131" font-size="11" font-weight="400" fill="#111827" text-anchor="start">Terminal: submitted, cancelled.</text>
+<text x="880" y="146" font-size="11" font-weight="400" fill="#111827" text-anchor="start"></text>
+<text x="880" y="161" font-size="11" font-weight="400" fill="#111827" text-anchor="start">dispatching is not cancellable.</text>
+<text x="880" y="176" font-size="11" font-weight="400" fill="#111827" text-anchor="start">A crash between the claim and</text>
+<text x="880" y="191" font-size="11" font-weight="400" fill="#111827" text-anchor="start">the Mailer call can strand it;</text>
+<text x="880" y="206" font-size="11" font-weight="400" fill="#111827" text-anchor="start">there is no lease reclaim.</text>
+<text x="880" y="221" font-size="11" font-weight="400" fill="#111827" text-anchor="start"></text>
+<text x="880" y="236" font-size="11" font-weight="400" fill="#111827" text-anchor="start">Not-accepted reasons are safe</text>
+<text x="880" y="251" font-size="11" font-weight="400" fill="#111827" text-anchor="start">codes: timeout, unreachable,</text>
+<text x="880" y="266" font-size="11" font-weight="400" fill="#111827" text-anchor="start">rejected, conflict (409),</text>
+<text x="880" y="281" font-size="11" font-weight="400" fill="#111827" text-anchor="start">invalid reply, not configured,</text>
+<text x="880" y="296" font-size="11" font-weight="400" fill="#111827" text-anchor="start">sender not synced.</text>
+<text x="40" y="318" font-size="11.5" font-weight="700" fill="#1E3A8A" text-anchor="start">submitted = the Mailer durably accepted the request. It does not mean generated, sent or delivered.</text>
+<rect x="180" y="340" width="740" height="40" rx="8" fill="#FFFBEB" stroke="#B45309" stroke-width="1.6" stroke-dasharray="5 3"/>
+<text x="550" y="358" font-size="12" font-weight="700" fill="#78350F" text-anchor="middle">Read-only observation: LeadBoost shows the Mailer's state next to its own.</text>
+<text x="550" y="373" font-size="11" font-weight="400" fill="#111827" text-anchor="middle">If LeadBoost says dispatch_failed and the Mailer says sent, both are shown. Nothing is written back or healed.</text>
+<path d="M550,330 L550,340" fill="none" stroke="#B45309" stroke-width="1.6" stroke-dasharray="6 4" marker-end="url(#w)"/>
+<path d="M550,380 L550,392" fill="none" stroke="#B45309" stroke-width="1.6" stroke-dasharray="6 4" marker-end="url(#w)"/>
+<rect x="10" y="392" width="1080" height="388" rx="12" fill="#FFFFFF" stroke="#059669" stroke-width="2"/>
+<path d="M10,404 a12,12 0 0 1 12,-12 h1056 a12,12 0 0 1 12,12 v14 h-1080 z" fill="#D1FAE5" stroke="none"/>
+<line x1="10" y1="418" x2="1090" y2="418" stroke="#059669" stroke-width="1"/>
+<text x="22" y="410" font-size="13" font-weight="700" fill="#065F46" text-anchor="start">Mailer: ExternalDispatch (generation, delivery, authoritative state)</text>
+<text x="1078" y="410" font-size="11.5" font-weight="400" fill="#065F46" text-anchor="end">owner: Mailer</text>
+<rect x="40" y="470" width="120" height="46" rx="10" fill="#FFFFFF" stroke="#059669" stroke-width="1.6"/>
+<text x="100.0" y="498" font-size="13" font-weight="700" fill="#065F46" text-anchor="middle">queued</text>
+<rect x="280" y="470" width="150" height="46" rx="10" fill="#FFFFFF" stroke="#059669" stroke-width="1.6" stroke-dasharray="5 3"/>
+<text x="355.0" y="490" font-size="13" font-weight="700" fill="#065F46" text-anchor="middle">generating</text>
+<text x="355.0" y="506" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="middle">internal; reads as queued</text>
+<rect x="540" y="470" width="130" height="46" rx="10" fill="#FFFFFF" stroke="#059669" stroke-width="1.6"/>
+<text x="605.0" y="498" font-size="13" font-weight="700" fill="#065F46" text-anchor="middle">sending</text>
+<rect x="790" y="470" width="120" height="46" rx="10" fill="#FFFFFF" stroke="#059669" stroke-width="3"/>
+<text x="850.0" y="498" font-size="13" font-weight="700" fill="#065F46" text-anchor="middle">sent</text>
+<rect x="790" y="560" width="120" height="46" rx="10" fill="#FFFFFF" stroke="#B45309" stroke-width="3"/>
+<text x="850.0" y="588" font-size="13" font-weight="700" fill="#78350F" text-anchor="middle">unknown</text>
+<rect x="540" y="620" width="130" height="46" rx="10" fill="#FFFFFF" stroke="#B91C1C" stroke-width="3"/>
+<text x="605.0" y="648" font-size="13" font-weight="700" fill="#7F1D1D" text-anchor="middle">failed</text>
+<path d="M160,482 L280,482" fill="none" stroke="#374151" stroke-width="1.6" marker-end="url(#a)"/>
+<rect x="168.0" y="460.0" width="104.0" height="18" rx="4" fill="#FFFFFF" fill-opacity="0.94"/>
+<text x="220.0" y="473.0" font-size="11.5" font-weight="500" fill="#111827" text-anchor="middle">claim to generate</text>
+<path d="M280,506 L160,506" fill="none" stroke="#374151" stroke-width="1.6" marker-end="url(#a)"/>
+<rect x="176.0" y="511.0" width="88.0" height="18" rx="4" fill="#FFFFFF" fill-opacity="0.94"/>
+<text x="220.0" y="524.0" font-size="11.5" font-weight="500" fill="#111827" text-anchor="middle">message saved</text>
+<path d="M100,470 L100,446 L605,446 L605,470" fill="none" stroke="#374151" stroke-width="1.6" marker-end="url(#a)"/>
+<rect x="271.5" y="437.0" width="162.0" height="18" rx="4" fill="#FFFFFF" fill-opacity="0.94"/>
+<text x="352.5" y="450.0" font-size="11.5" font-weight="500" fill="#111827" text-anchor="middle">send claim (message exists)</text>
+<path d="M670,493 L790,493" fill="none" stroke="#374151" stroke-width="1.6" marker-end="url(#a)"/>
+<rect x="686.0" y="471.0" width="88.0" height="18" rx="4" fill="#FFFFFF" fill-opacity="0.94"/>
+<text x="730.0" y="484.0" font-size="11.5" font-weight="500" fill="#111827" text-anchor="middle">SMTP accepted</text>
+<path d="M670,510 L730,510 L730,583 L790,583" fill="none" stroke="#B45309" stroke-width="1.6" stroke-dasharray="6 4" marker-end="url(#w)"/>
+<rect x="610.0" y="559.5" width="116.0" height="18" rx="4" fill="#FFFFFF" fill-opacity="0.94"/>
+<text x="668.0" y="572.5" font-size="11.5" font-weight="500" fill="#B45309" text-anchor="middle">ambiguous outcome</text>
+<path d="M605,516 L605,620" fill="none" stroke="#B91C1C" stroke-width="1.6" marker-end="url(#e)"/>
+<rect x="503.0" y="559.0" width="96.0" height="18" rx="4" fill="#FFFFFF" fill-opacity="0.94"/>
+<text x="551.0" y="572.0" font-size="11.5" font-weight="500" fill="#B91C1C" text-anchor="middle">definite failure</text>
+<path d="M355,516 L355,643 L540,643" fill="none" stroke="#B91C1C" stroke-width="1.6" marker-end="url(#e)"/>
+<rect x="298.5" y="634.0" width="150.0" height="18" rx="4" fill="#FFFFFF" fill-opacity="0.94"/>
+<text x="373.5" y="647.0" font-size="11.5" font-weight="500" fill="#B91C1C" text-anchor="middle">LLM error / draft blocked</text>
+<text x="540" y="684" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">Send-gate refusals: failed.</text>
+<rect x="720" y="640" width="360" height="130" rx="6" fill="#ECFDF5" stroke="#059669" stroke-width="1.4" stroke-dasharray="5 3"/>
+<text x="730" y="658" font-size="12" font-weight="700" fill="#065F46" text-anchor="start">Rules</text>
+<text x="730" y="675" font-size="11" font-weight="400" fill="#111827" text-anchor="start">Public vocabulary: queued, sending, sent, failed, unknown.</text>
+<text x="730" y="690" font-size="11" font-weight="400" fill="#111827" text-anchor="start"></text>
+<text x="730" y="705" font-size="11" font-weight="400" fill="#111827" text-anchor="start">unknown = unconfirmed, not failed; never auto-resent.</text>
+<text x="730" y="720" font-size="11" font-weight="400" fill="#111827" text-anchor="start">An expired SENDING lease resolves to unknown, not queued.</text>
+<text x="730" y="735" font-size="11" font-weight="400" fill="#111827" text-anchor="start">sent = SMTP handoff succeeded, not inbox delivery.</text>
+<text x="730" y="750" font-size="11" font-weight="400" fill="#111827" text-anchor="start">failed is terminal here; a retry is a new operation.</text>
+<text x="730" y="765" font-size="11" font-weight="400" fill="#111827" text-anchor="start">An expired generating lease safely returns to queued.</text>
+</svg>

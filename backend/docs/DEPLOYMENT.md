@@ -1,47 +1,47 @@
 # Deployment Guide
 
-The target deployment shape described for this project is:
+This guide describes the **intended deployment topology** and the **configuration each service requires**. It is
+provider-neutral on purpose: it states what must be true, not which hosting product provides it.
 
-- **Frontend → Vercel**
-- **Backend → Render**
+![Deployment topology: frontend service, one LeadBoost backend process with its own PostgreSQL, a Mailer API service, exactly one Mailer worker and the Mailer's own PostgreSQL](diagrams/leadboost-deployment-topology.svg)
 
-Neither of those requires Docker Compose, Nginx, or Kubernetes -- both
-platforms build and run your service directly. The Docker/Compose
-artifacts in this repo (`Dockerfile`, `docker-compose.yml`,
-`docker-compose.prod.yml`, `deploy/nginx.conf`) exist for local
-development and as an *optional* self-hosted/VPS path if you ever need
-one -- see the bottom of this document for that case.
+*Diagram: [`leadboost-deployment-topology.svg`](diagrams/leadboost-deployment-topology.svg).*
 
-> **Status:** the LeadBoost frontend, LeadBoost backend and the Mailer Agent are
-> already deployed as separate services; nothing in this repository creates or
-> modifies them (there is deliberately no root `render.yaml`, which could create
-> duplicates). This guide documents the wiring they must have. Dashboard-only
-> settings (root directory, environment values, pre-deploy command) cannot be
-> checked from the repository -- treat each as **unverified until confirmed in
-> the dashboard**.
+| Service | Instances | Notes |
+|---|---|---|
+| Frontend (`frontend-react/`, Next.js 14) | any | `NEXT_PUBLIC_API_URL` baked in at build time |
+| LeadBoost backend (`backend/`) | **one** | API and the in-process job loop share the process; own PostgreSQL |
+| Mailer API (separate repository) | 1+ | `gunicorn` with 2 uvicorn workers; no scheduler in this process |
+| Mailer worker (separate repository) | **exactly one** | Owns the scheduler; shares the Mailer's PostgreSQL with the API |
 
-## Backend on Render
+> **Deployment and verification status.** The frontend, the LeadBoost backend, the Mailer API and the Mailer worker
+> are deployed as separate services. The operator reports them running, with the worker observed separately from
+> the APIs. Hostnames and hosting-console settings (root directory, environment values, release or pre-deploy
+> command) are managed in the hosting console and are intentionally not published; record them in your own
+> operations notes. This repository defines the topology and configuration requirements; it does not create or
+> modify the hosted services. A hosted delivery acceptance record (dispatch receipt plus a message received in a
+> recipient mailbox) is not included, so delivery to a real inbox is not asserted. See
+> [`SYSTEM_DESIGN.md`](SYSTEM_DESIGN.md) §15.
 
-1. **Web Service**, pointing at this repository (create one only if a service
-   does not already exist; see the status note). Render
-   detects the `Dockerfile` automatically (Build Command / Start Command
-   fields can be left blank -- the Dockerfile's own `CMD` handles it).
-   **The Docker build context must be `backend/`** (set the service's Root
-   Directory to `backend`): the Dockerfile does `COPY requirements.txt .` and
+The Docker and Compose artifacts (`Dockerfile`, `docker-compose.yml`, `docker-compose.prod.yml`,
+`deploy/nginx.conf`) serve local development and an optional self-hosted path; see the end of this document.
+
+## LeadBoost backend service
+
+1. **Web service** built from this repository's `Dockerfile` (no separate build or start command is needed; the
+   Dockerfile's own `CMD` starts the app).
+   **The Docker build context must be `backend/`** (set the service's root
+   directory to `backend`): the Dockerfile does `COPY requirements.txt .` and
    `COPY . .` relative to that directory. Inside the image everything lives in
    `/app` -- `alembic.ini`, `alembic/`, `scripts/` and `main.py` are all at
    `/app/...` (checked against `backend/Dockerfile` and `.dockerignore`; there is
    no `/app/backend`). The image binds port **8000** in its `CMD` (it does not
-   read `$PORT`); set the service's `PORT` environment variable to `8000` so
-   Render's routing target matches (not verified against the live service).
+   read `$PORT`); make the platform's routing target port 8000.
 
-2. **Instance type**: Render's Starter tier (~512MB RAM) is the target
-   this backend was tuned for -- see SECTION 3 of the production-polish
-   brief and `docs/DOCKER.md`'s note on Playwright's memory footprint.
-   Start there; move up only if you see actual memory pressure in
-   Render's metrics.
+2. **Instance size**: the backend was tuned for roughly 512 MB of RAM; see `docs/DOCKER.md` for Playwright's
+   memory footprint. Start small; move up only on actual memory pressure in your platform's metrics.
 
-3. **Environment variables** (Render's dashboard → Environment): set
+3. **Environment variables** (your platform's secret/environment settings): set
    every variable listed as "required" in `docs/ENVIRONMENT.md`, at
    minimum:
    - `ENVIRONMENT=production`
@@ -49,10 +49,9 @@ one -- see the bottom of this document for that case.
      in production with the placeholder value or anything under 32
      characters** (see `core/config.py`) -- this is intentional, not a
      bug to work around.
-   - `DATABASE_URL` — use Render's managed Postgres and paste its
-     internal connection string here (must start with `postgresql://`;
-     the app also refuses to start on sqlite in production).
-   - `ALLOWED_ORIGINS` — your actual Vercel frontend URL(s), comma
+   - `DATABASE_URL` — a managed PostgreSQL connection string (must start with `postgresql://`; the app also
+     refuses to start on sqlite in production). Never commit it.
+   - `ALLOWED_ORIGINS` — your actual frontend origin(s), comma
      separated. Never `*` in production (also enforced at startup).
    - `EMAIL_CREDENTIAL_ENCRYPTION_KEY` — encrypts stored email-account
      credentials; keep it stable (changing it makes stored credentials
@@ -70,7 +69,7 @@ one -- see the bottom of this document for that case.
 
    | Route | Checks | Use it for |
    |---|---|---|
-   | `/live` | nothing (static `{"status":"alive"}`) | Render's health check and the image `HEALTHCHECK` |
+   | `/live` | nothing (static `{"status":"alive"}`) | the platform health check and the image `HEALTHCHECK` |
    | `/ready` | database (`SELECT 1`); 503 if it fails | readiness / your own monitoring |
    | `/health` | database **and Redis**; 503 if either fails | humans only -- never as the platform check |
 
@@ -104,7 +103,7 @@ separate worker service.
   `JOB_WORKER_ENABLED` (default `true`), `JOB_WORKER_CONCURRENCY` (default `3`),
   `JOB_POLL_INTERVAL_SECONDS` (default `2`, minimum `0.5`).
 * Capacity: concurrency 3 alongside Playwright on a ~512 MB instance is a
-  memory risk. Watch Render's memory metric; change `JOB_WORKER_CONCURRENCY`
+  memory risk. Watch the memory metric; change `JOB_WORKER_CONCURRENCY`
   only on evidence.
 * Shutdown: `stop()` signals the loop and waits up to 10 s; unfinished work is
   recovered by lease reclaim on the next start.
@@ -129,28 +128,57 @@ never calls the Mailer and must never receive a Mailer URL or key
 * Redirects are not followed (httpx default), and failures are logged by type
   only, never with request content or the key.
 * Whether the deployed values agree is **not verifiable from this repository**;
-  it is proven by an authenticated request to the deployed Mailer (C14).
+  it is proven only by an authenticated request to the deployed Mailer.
 * `/mailer-state` is read-only: it never heals, retries or overwrites Mailer
   delivery state.
 
-## Frontend on Vercel
+## Mailer services (summary; the runbook is canonical)
+
+The Mailer is operated from its own repository. Its authoritative procedure is
+[`C13_DEPLOYMENT_RUNBOOK.md`](https://github.com/anupamkr1708/LeadBoost-mail-agent/blob/main/docs/C13_DEPLOYMENT_RUNBOOK.md).
+What LeadBoost operators need to know:
+
+| Requirement | Detail |
+|---|---|
+| Two processes, one database | **API** (`gunicorn` + uvicorn workers, `RUN_SCHEDULER_IN_PROCESS=false`) and **worker** (`python worker.py`, exactly one instance), both on the Mailer's own PostgreSQL |
+| Identical on API and worker | `DATABASE_URL`, `MAILBOX_ENCRYPTION_KEY` (losing it makes stored mailbox credentials unreadable; keep an offline backup) |
+| Tenant auth | `ORG_KEY_MAP` `{key: org_id}`, agreeing with LeadBoost's `MAILING_AGENT_ORG_API_KEYS` |
+| Operator auth | `SYSTEM_OPERATOR_API_KEY`, a different secret from every tenant key; never given to LeadBoost |
+| First dispatch | `LEADBOOST_INTEGRATION_SENDER_EMAIL` must be set, or the first dispatch for an organization returns 503 |
+| Real sending | `LIVE_SENDING_ENABLED` on the worker gates actual SMTP sends |
+| Pausing sends | Suspend the worker. Do not flip `LIVE_SENDING_ENABLED` as a pause |
+| Public surface | The API's interactive docs are disabled unless `API_DOCS_ENABLED=true` |
+
+Verifying the link is an authenticated request from the deployed LeadBoost to the deployed Mailer, never a file
+in either repository. This guide records no result of such a check.
+
+### A stranded `dispatching` action
+
+If the LeadBoost process dies after an action is claimed (`approved → dispatching`) and before the Mailer answers,
+the action can stay `dispatching`. There is no automatic reclaim and no supported API to reset it, and a
+`dispatching` action cannot be cancelled. Before anything else, read the Mailer's view for that action with
+`GET /api/v2/outreach-actions/{id}/mailer-state`: if the Mailer reports a dispatch, the request was accepted;
+if it reports `not_found_at_mailer`, it was not. Resolving the LeadBoost row is an operator decision made with
+the maintainers; do not create a duplicate action to "force" a send.
+
+## Frontend service
 
 The frontend source **is** in this repository: `frontend-react/` (Next.js 14).
 (An earlier version of this guide said otherwise; that was stale.)
 
-1. Vercel project **Root Directory: `frontend-react`** (it is a subdirectory of
-   a monorepo; there is no `vercel.json`).
+1. Build from the **`frontend-react`** subdirectory of this monorepo (set the project's root directory
+   accordingly).
 2. Set `NEXT_PUBLIC_API_URL` to the LeadBoost **backend's** public `https://` URL.
    It is read at **build time** and baked into the browser bundle; the default
    when unset is `http://localhost:8000`, so a missing value ships a build that
    calls localhost. Changing it requires a rebuild.
-3. Put that exact Vercel origin (scheme + host, no trailing slash; include
+3. Put that exact frontend origin (scheme + host, no trailing slash; include
    preview origins only if you use them) in the backend's `ALLOWED_ORIGINS`.
 4. Do not add any Mailer URL or key to the frontend. Today the browser only
    consumes LeadBoost's own read-only `GET /api/v2/outreach-actions/{id}/mailer-state`
    view (`src/types/api.ts`, `mailer-state-panel.tsx`); there is no Mailer host or
-   key in `src/`. (`mailing_agent_reference` is still present in a browser-facing
-   response type -- a known review item, tracked for C15.)
+   key in `src/`. (`mailing_agent_reference`, an opaque string, is still present in the browser-facing `OutreachAction` type, a
+   known review item.)
 
 `FRONTEND_URL` is consumed only by the dormant Stripe return-URL code; it is not
 needed for the current flow.
@@ -253,7 +281,7 @@ comfortable letting it create/drop databases on:
 
 ```
 docker-compose up -d postgres   # already defined in backend/docker-compose.yml
-export ALEMBIC_TEST_DATABASE_URL=postgresql://leadboost:leadboost@localhost:5432/postgres
+export ALEMBIC_TEST_DATABASE_URL="postgresql://<user>:<password>@localhost:5432/postgres"   # a disposable local server
 python -m pytest tests/infrastructure/
 ```
 
@@ -261,9 +289,8 @@ python -m pytest tests/infrastructure/
 
 Run `alembic upgrade head` as a **separate deploy step that happens once
 per deploy**, before the new application code starts serving traffic --
-never inside FastAPI's `lifespan`/startup. On the current single-Render-
-Web-Service setup, that's one instance either way, but the app should
-never assume that: `alembic upgrade head` racing against itself from
+never inside FastAPI's `lifespan`/startup. With a single backend instance
+that is one run either way, but the app should never assume that: `alembic upgrade head` racing against itself from
 multiple starting replicas is exactly the failure mode a release-step
 migration avoids, and there's no reason to give it up.
 
@@ -274,11 +301,10 @@ migration avoids, and there's no reason to give it up.
 > fail. No live LeadBoost database has been verified or adopted by this
 > repository; the adoption state is an operator-only fact.
 
-Render supports this natively via **Pre-Deploy Command** (Dashboard →
-your service → Settings → "Pre-Deploy Command"; it runs once per deploy, before
-the new version serves traffic, and a failure cancels the deploy). It runs inside
+Use your platform's **release / pre-deploy hook** if it has one (it should run once per deploy, before the new
+version serves traffic, and a failure should cancel the deploy). It runs inside
 the **built image**, whose working directory is `/app` (where `alembic.ini`
-lives), so for the Docker service with Root Directory `backend` the command is:
+lives), so for the Docker service built from `backend/` the command is:
 
 ```
 alembic upgrade head
@@ -293,10 +319,7 @@ Order matters on a **fresh** database: run the migration before the first app
 start. The app's startup `create_all()` would otherwise create the tables first,
 and the baseline revision would then fail on "already exists".
 
-This repository doesn't currently define a `render.yaml` blueprint (the
-Render service is configured directly via the dashboard, as described
-above in "Backend on Render") -- if one is introduced later, the
-equivalent is the `preDeployCommand` key. Either way, do not add
+Whatever the mechanism, do not add
 `alembic upgrade head` to the Dockerfile's `CMD` or to `main.py`'s
 `lifespan`: both run once per replica, which is exactly what a release-
 step migration is meant to avoid.
@@ -308,8 +331,8 @@ hook in a plain Compose setup.
 
 ## Release and rollback
 
-* **Identify the deployed version:** the Render service's Deploys view shows the
-  commit; the Vercel project's Deployments view shows the frontend commit.
+* **Identify the deployed version:** your platform's deploy history shows the commit each service is running;
+  check the backend and the frontend separately.
 * **App rollback does not roll back the schema.** Redeploying an older commit
   leaves the database at whatever Alembic revision it reached. Old code against
   a newer schema is only safe if every migration since was additive; check each
@@ -340,7 +363,7 @@ which is deliberately not exposed over the API to any regular user.
 
 ## Optional: self-hosted / VPS deployment
 
-If you'd rather run everything on a single VPS instead of Vercel+Render:
+If you'd rather run everything on a single VPS instead of managed services:
 
 ```bash
 cp .env.example .env   # fill in real values

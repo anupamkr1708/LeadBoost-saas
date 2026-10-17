@@ -23,7 +23,7 @@ has minimal friction.
 
 | Variable | Powers | If unset |
 |---|---|---|
-| `GROQ_API_KEY` | LLM calls for enrichment, qualification, decisioning, outreach drafting | Those stages fall back to their existing deterministic/heuristic paths (see `docs/ARCHITECTURE.md`) — the pipeline still runs, just without AI. |
+| `GROQ_API_KEY` | LLM calls for enrichment, qualification, decisioning, outreach drafting | Those stages fall back to their existing deterministic/heuristic paths (see `docs/SYSTEM_DESIGN.md` §6 and `docs/OBSERVABILITY_AND_METRICS.md`) — the pipeline still runs, just without AI. |
 | `SERPER_API_KEY` | Website-resolution fallback (when a business has no website in the primary search provider's data) and the general "primary search found nothing" discovery fallback | Businesses without a directly-provided website are reported unvalidated (`no_website`) instead of resolved; the discovery fallback simply doesn't fire. |
 | `BRAVE_API_KEY` | Alternate website-resolution fallback provider (constructor-injectable; Serper is the default) | N/A unless you specifically wire `BraveWebsiteResolver` in as `resolver_fallback`. |
 | `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` | Future billing integration | Not used at all yet — see `core/infrastructure/billing/stripe_service.py` and PART 8/SECTION 10 of the brief. The `/upgrade` endpoint doesn't need these; it never calls Stripe. |
@@ -70,7 +70,7 @@ has minimal friction.
 |---|---|---|
 | `EMAIL_CREDENTIAL_ENCRYPTION_KEY` | yes, to store email-account credentials | **Secret** Fernet key (`core/infrastructure/security/credential_crypto.py`), validated on every use. Keep it stable: changing or losing it makes stored credentials unreadable. |
 
-## Frontend (build-time, set in Vercel -- not read by the backend)
+## Frontend (build-time, set in the frontend build environment -- not read by the backend)
 
 | Variable | Notes |
 |---|---|

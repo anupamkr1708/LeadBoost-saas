@@ -12,10 +12,12 @@ deployments that talk only over HTTP; no code, model, ORM class or encryption ke
 * Header `X-API-Key: <key>`. **Mailer is the tenant authority**: it maps the key to its
   organization (`ORG_KEY_MAP`, `{"<key>":"<org_id>"}`). LeadBoost never sends an organization id
   in a body and nothing in a body is used for authorization.
-* LeadBoost holds **one key per LeadBoost organization**:
+* LeadBoost holds **one distinct key per LeadBoost organization**:
   `MAILING_AGENT_ORG_API_KEYS={"<leadboost_org_id>":"<mailer_api_key>"}`. No key for the org ⇒
-  fail closed (`mailing_agent_auth_not_configured`). A single shared key is not supported — it
-  would collapse every customer into one Mailer organization. `MAILING_AGENT_API_KEY` is no longer read.
+  fail closed (`mailing_agent_auth_not_configured`). Duplicate values are not rejected by the
+  current client, so operators must ensure every LeadBoost organization maps to a unique Mailer
+  API key; a duplicate can cause multiple LeadBoost organizations to authenticate as the same
+  Mailer tenant. `MAILING_AGENT_API_KEY` is no longer read.
 * `MAILING_AGENT_BASE_URL` must be `https://` (or `http://` to loopback only). Redirects are not followed.
 * Operator provisions the per-org keys; automated tenant-key provisioning is deferred.
 
@@ -115,6 +117,26 @@ LeadBoost GET /api/v2/outreach-actions/{action_id}/mailer-state      (customer-f
 * A mailbox created by the Mailer whose reference LeadBoost then lost, on an account that is *disabled before the
   next reconcile*, is not contacted (never provisioned ⇒ nothing to disable); it is adopted by e-mail the next time
   the account is activated, and until then a second ACTIVE mailbox makes the Mailer answer `409` (fail closed).
-* Deferred: implicit TLS (`SMTP_SSL`), automated tenant-key provisioning, `display_name` in the Mailer, IMAP /
-  inbound (M3), removing LeadBoost's own encrypted credential; **healing** LeadBoost's `DISPATCH_FAILED` from the Mailer's
+* Deferred: implicit TLS (`SMTP_SSL`), automated tenant-key provisioning, `display_name` in the Mailer, closing the
+  inbound provenance gap (webhook and legacy global poll), removing LeadBoost's own encrypted credential; **healing** LeadBoost's `DISPATCH_FAILED` from the Mailer's
   state (C9.3 only *displays* it).
+
+## Inbound mail (IMAP) — current behaviour
+
+An earlier revision of this contract listed IMAP / inbound (M3) as deferred. That entry is **historical**: the Mailer
+now receives replies itself.
+
+* **Where it runs.** The Mailer worker polls each ACTIVE mailbox that has a complete IMAP configuration (default every
+  120 s), using that mailbox's own encrypted credential. Nothing falls back to a deployment-global identity.
+* **How it is configured.** IMAP settings are an all-or-none set on the Mailer mailbox (`imap_host`, `imap_port`,
+  `imap_username`, `imap_password`), written through the Mailer API with the organization's key (see the Mailer's
+  `LEADBOOST_L1_MAILBOX_CONTRACT.md`). **LeadBoost never sends IMAP settings** and does not read the mailbox; a mailbox
+  without them is skipped by the poll.
+* **Tenant binding.** Tenant and mailbox come from the polled row, never from message content. Replies are correlated
+  within that organization and mailbox (RFC `In-Reply-To`/`References` first, otherwise a unique sender address);
+  ambiguous or unmatched mail is not persisted.
+* **What LeadBoost sees.** Only the read-only conversation view in section 3, restricted to mail received
+  through a mailbox owned by the organization. For LeadBoost-authorized contacts the Mailer stores and classifies
+  replies but does not send automatic follow-ups or auto-replies; a further email needs a new authorized action.
+* **Still outside the view.** Mail that arrived by webhook or through the legacy deployment-global poll has no provable
+  mailbox owner and stays excluded.
