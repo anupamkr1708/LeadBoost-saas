@@ -1,0 +1,167 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 716" width="1180" height="716" role="img" aria-labelledby="t d" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+<title id="t">LeadBoost end-to-end pipeline</title><desc id="d">Three-row pipeline in fifteen numbered stages. Row one: query parsing, business search, identity resolution, validation, deduplication and ranking, and lead creation. Row two, right to left: scraping and normalization, enrichment, LangGraph qualification, the review gate with the outreach draft, and persistence. Row three: sender setup, authorization and dispatch in LeadBoost, then message generation, SMTP sending and IMAP reply intake in the separate Mailer, and LeadBoost's read-only conversation view.</desc>
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#374151"/></marker><marker id="as" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#374151"/></marker><marker id="w" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#B45309"/></marker><marker id="ws" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#B45309"/></marker><marker id="e" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#B91C1C"/></marker><marker id="es" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#B91C1C"/></marker></defs>
+<rect width="1180" height="716" fill="#FFFFFF"/>
+<text x="20" y="26" font-size="16" font-weight="700" fill="#111827" text-anchor="start">LeadBoost end-to-end pipeline</text>
+<text x="20" y="44" font-size="12" font-weight="400" fill="#4B5563" text-anchor="start">From a plain-language query to a visible email conversation. Fifteen stages, three rows; row two runs right to left.</text>
+<rect x="20" y="60" width="1140" height="164" rx="12" fill="#FFFFFF" stroke="#2563EB" stroke-width="2"/>
+<path d="M20,72 a12,12 0 0 1 12,-12 h1116 a12,12 0 0 1 12,12 v14 h-1140 z" fill="#DBEAFE" stroke="none"/>
+<line x1="20" y1="86" x2="1160" y2="86" stroke="#2563EB" stroke-width="1"/>
+<text x="32" y="78" font-size="13" font-weight="700" fill="#1E3A8A" text-anchor="start">LeadBoost: discovery</text>
+<rect x="33" y="100" width="184" height="106" rx="9" fill="#EFF6FF" stroke="#2563EB" stroke-width="1.5"/>
+<text x="131.0" y="126" font-size="13" font-weight="700" fill="#1E3A8A" text-anchor="middle">Query</text>
+<text x="125.0" y="146" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">Plain-language request;</text>
+<text x="125.0" y="161" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">deterministic parser:</text>
+<text x="125.0" y="176" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">regex + city gazetteer,</text>
+<text x="125.0" y="191" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">no LLM</text>
+<circle cx="48" cy="101" r="10" fill="#2563EB"/>
+<text x="48" y="105" font-size="11.5" font-weight="700" fill="#FFFFFF" text-anchor="middle">1</text>
+<rect x="266" y="100" width="184" height="106" rx="9" fill="#EFF6FF" stroke="#2563EB" stroke-width="1.5"/>
+<text x="364.0" y="126" font-size="13" font-weight="700" fill="#1E3A8A" text-anchor="middle">Business search</text>
+<text x="358.0" y="146" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">Overpass first (4-tier</text>
+<text x="358.0" y="161" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">location fallback); Serper</text>
+<text x="358.0" y="176" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">only when Overpass</text>
+<text x="358.0" y="191" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">finds nothing</text>
+<circle cx="281" cy="101" r="10" fill="#2563EB"/>
+<text x="281" y="105" font-size="11.5" font-weight="700" fill="#FFFFFF" text-anchor="middle">2</text>
+<path d="M217,153.0 L266,153.0" fill="none" stroke="#374151" stroke-width="1.6" marker-end="url(#a)"/>
+<rect x="499" y="100" width="184" height="106" rx="9" fill="#EFF6FF" stroke="#2563EB" stroke-width="1.5"/>
+<text x="597.0" y="126" font-size="13" font-weight="700" fill="#1E3A8A" text-anchor="middle">Identity resolution</text>
+<text x="591.0" y="146" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">Evidence, features,</text>
+<text x="591.0" y="161" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">verification, confidence;</text>
+<text x="591.0" y="176" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">official website or</text>
+<text x="591.0" y="191" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">nothing (never invented)</text>
+<circle cx="514" cy="101" r="10" fill="#2563EB"/>
+<text x="514" y="105" font-size="11.5" font-weight="700" fill="#FFFFFF" text-anchor="middle">3</text>
+<path d="M450,153.0 L499,153.0" fill="none" stroke="#374151" stroke-width="1.6" marker-end="url(#a)"/>
+<rect x="732" y="100" width="184" height="106" rx="9" fill="#EFF6FF" stroke="#2563EB" stroke-width="1.5"/>
+<text x="830.0" y="126" font-size="13" font-weight="700" fill="#1E3A8A" text-anchor="middle">Validate, dedupe, rank</text>
+<text x="824.0" y="146" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">Reachable HTML page, no</text>
+<text x="824.0" y="161" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">directory or social URL;</text>
+<text x="824.0" y="176" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">duplicates removed;</text>
+<text x="824.0" y="191" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">deterministic ranking</text>
+<circle cx="747" cy="101" r="10" fill="#2563EB"/>
+<text x="747" y="105" font-size="11.5" font-weight="700" fill="#FFFFFF" text-anchor="middle">4</text>
+<path d="M683,153.0 L732,153.0" fill="none" stroke="#374151" stroke-width="1.6" marker-end="url(#a)"/>
+<rect x="965" y="100" width="184" height="106" rx="9" fill="#EFF6FF" stroke="#2563EB" stroke-width="1.5"/>
+<text x="1063.0" y="126" font-size="13" font-weight="700" fill="#1E3A8A" text-anchor="middle">Lead creation</text>
+<text x="1057.0" y="146" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">Organization-scoped and</text>
+<text x="1057.0" y="161" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">quota-aware; inline job</text>
+<text x="1057.0" y="176" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">from discovery, durable</text>
+<text x="1057.0" y="191" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">job for direct creation</text>
+<circle cx="980" cy="101" r="10" fill="#2563EB"/>
+<text x="980" y="105" font-size="11.5" font-weight="700" fill="#FFFFFF" text-anchor="middle">5</text>
+<path d="M916,153.0 L965,153.0" fill="none" stroke="#374151" stroke-width="1.6" marker-end="url(#a)"/>
+<rect x="20" y="250" width="1140" height="164" rx="12" fill="#FFFFFF" stroke="#2563EB" stroke-width="2"/>
+<path d="M20,262 a12,12 0 0 1 12,-12 h1116 a12,12 0 0 1 12,12 v14 h-1140 z" fill="#DBEAFE" stroke="none"/>
+<line x1="20" y1="276" x2="1160" y2="276" stroke="#2563EB" stroke-width="1"/>
+<text x="32" y="268" font-size="13" font-weight="700" fill="#1E3A8A" text-anchor="start">LeadBoost: qualification workflow (LangGraph)</text>
+<rect x="965" y="290" width="184" height="106" rx="9" fill="#EFF6FF" stroke="#2563EB" stroke-width="1.5"/>
+<text x="1063.0" y="316" font-size="13" font-weight="700" fill="#1E3A8A" text-anchor="middle">Scrape + normalize</text>
+<text x="1057.0" y="336" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">6 escalating tiers: static,</text>
+<text x="1057.0" y="351" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">curl_cffi, Playwright,</text>
+<text x="1057.0" y="366" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">multi-page, fallback;</text>
+<text x="1057.0" y="381" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">pure normalization</text>
+<circle cx="980" cy="291" r="10" fill="#2563EB"/>
+<text x="980" y="295" font-size="11.5" font-weight="700" fill="#FFFFFF" text-anchor="middle">6</text>
+<rect x="732" y="290" width="184" height="106" rx="9" fill="#EFF6FF" stroke="#2563EB" stroke-width="1.5"/>
+<text x="830.0" y="316" font-size="13" font-weight="700" fill="#1E3A8A" text-anchor="middle">Enrich</text>
+<text x="824.0" y="336" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">3-tier waterfall:</text>
+<text x="824.0" y="351" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">deterministic first, then</text>
+<text x="824.0" y="366" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">an external-API tier</text>
+<text x="824.0" y="381" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">(placeholder), LLM last</text>
+<circle cx="747" cy="291" r="10" fill="#2563EB"/>
+<text x="747" y="295" font-size="11.5" font-weight="700" fill="#FFFFFF" text-anchor="middle">7</text>
+<path d="M965,343.0 L916,343.0" fill="none" stroke="#374151" stroke-width="1.6" marker-end="url(#a)"/>
+<rect x="499" y="290" width="184" height="106" rx="9" fill="#EFF6FF" stroke="#2563EB" stroke-width="1.5"/>
+<text x="597.0" y="316" font-size="13" font-weight="700" fill="#1E3A8A" text-anchor="middle">Qualify</text>
+<text x="591.0" y="336" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">Company intelligence,</text>
+<text x="591.0" y="351" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">scoring, decision,</text>
+<text x="591.0" y="366" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">confidence evaluation;</text>
+<text x="591.0" y="381" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">AI steps have fallbacks</text>
+<circle cx="514" cy="291" r="10" fill="#2563EB"/>
+<text x="514" y="295" font-size="11.5" font-weight="700" fill="#FFFFFF" text-anchor="middle">8</text>
+<path d="M732,343.0 L683,343.0" fill="none" stroke="#374151" stroke-width="1.6" marker-end="url(#a)"/>
+<rect x="266" y="290" width="184" height="106" rx="9" fill="#FFFBEB" stroke="#B45309" stroke-width="1.5"/>
+<text x="364.0" y="316" font-size="13" font-weight="700" fill="#78350F" text-anchor="middle">Review gate + draft</text>
+<text x="358.0" y="336" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">0.75+ approved; 0.45 to</text>
+<text x="358.0" y="351" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">0.75 flagged, both draft;</text>
+<text x="358.0" y="366" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">below 0.45 human review,</text>
+<text x="358.0" y="381" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">no draft</text>
+<circle cx="281" cy="291" r="10" fill="#B45309"/>
+<text x="281" y="295" font-size="11.5" font-weight="700" fill="#FFFFFF" text-anchor="middle">9</text>
+<path d="M499,343.0 L450,343.0" fill="none" stroke="#374151" stroke-width="1.6" marker-end="url(#a)"/>
+<rect x="33" y="290" width="184" height="106" rx="9" fill="#EFF6FF" stroke="#2563EB" stroke-width="1.5"/>
+<text x="131.0" y="316" font-size="13" font-weight="700" fill="#1E3A8A" text-anchor="middle">Persist + analytics</text>
+<text x="125.0" y="336" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">Lead, scores and status</text>
+<text x="125.0" y="351" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">stored with per-stage logs;</text>
+<text x="125.0" y="366" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">a failed node degrades</text>
+<text x="125.0" y="381" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">to a partial result</text>
+<circle cx="48" cy="291" r="10" fill="#2563EB"/>
+<text x="48" y="295" font-size="11.5" font-weight="700" fill="#FFFFFF" text-anchor="middle">10</text>
+<path d="M266,343.0 L217,343.0" fill="none" stroke="#374151" stroke-width="1.6" marker-end="url(#a)"/>
+<path d="M1057.0,206 L1057.0,290" fill="none" stroke="#374151" stroke-width="1.6" marker-end="url(#a)"/>
+<rect x="20" y="440" width="1140" height="190" rx="12" fill="#FFFFFF" stroke="#6B7280" stroke-width="2"/>
+<path d="M20,452 a12,12 0 0 1 12,-12 h1116 a12,12 0 0 1 12,12 v14 h-1140 z" fill="#E5E7EB" stroke="none"/>
+<line x1="20" y1="466" x2="1160" y2="466" stroke="#6B7280" stroke-width="1"/>
+<text x="32" y="458" font-size="13" font-weight="700" fill="#1F2937" text-anchor="start">Outreach: authorization in LeadBoost, execution in the Mailer</text>
+<rect x="489" y="468" width="410" height="152" rx="10" fill="#F6FEFA" stroke="#059669" stroke-width="1.6" stroke-dasharray="6 4"/>
+<text x="501" y="486" font-size="11.5" font-weight="700" fill="#065F46" text-anchor="start">Mailer Agent: separate service, repository and database</text>
+<rect x="33" y="502" width="184" height="106" rx="9" fill="#EFF6FF" stroke="#2563EB" stroke-width="1.5"/>
+<text x="131.0" y="528" font-size="13" font-weight="700" fill="#1E3A8A" text-anchor="middle">Sender setup</text>
+<text x="125.0" y="548" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">Account verified (own</text>
+<text x="125.0" y="563" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">SMTP login test), then</text>
+<text x="125.0" y="578" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">synced to a Mailer</text>
+<text x="125.0" y="593" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">mailbox (pending, synced)</text>
+<circle cx="48" cy="503" r="10" fill="#2563EB"/>
+<text x="48" y="507" font-size="11.5" font-weight="700" fill="#FFFFFF" text-anchor="middle">11</text>
+<rect x="239" y="502" width="184" height="106" rx="9" fill="#EFF6FF" stroke="#2563EB" stroke-width="1.5"/>
+<text x="337.0" y="528" font-size="13" font-weight="700" fill="#1E3A8A" text-anchor="middle">Authorize + dispatch</text>
+<text x="331.0" y="548" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">Action: pending_review,</text>
+<text x="331.0" y="563" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">approved, dispatching;</text>
+<text x="331.0" y="578" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">submitted on Mailer 202</text>
+<text x="331.0" y="593" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">(idempotency key)</text>
+<circle cx="254" cy="503" r="10" fill="#2563EB"/>
+<text x="254" y="507" font-size="11.5" font-weight="700" fill="#FFFFFF" text-anchor="middle">12</text>
+<rect x="499" y="502" width="184" height="106" rx="9" fill="#ECFDF5" stroke="#059669" stroke-width="1.5"/>
+<text x="597.0" y="528" font-size="13" font-weight="700" fill="#065F46" text-anchor="middle">Generate + send</text>
+<text x="591.0" y="548" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">Durable intake (QUEUED);</text>
+<text x="591.0" y="563" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">worker writes the message</text>
+<text x="591.0" y="578" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">and sends over SMTP:</text>
+<text x="591.0" y="593" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">sent, failed or unknown</text>
+<circle cx="514" cy="503" r="10" fill="#059669"/>
+<text x="514" y="507" font-size="11.5" font-weight="700" fill="#FFFFFF" text-anchor="middle">13</text>
+<rect x="705" y="502" width="184" height="106" rx="9" fill="#ECFDF5" stroke="#059669" stroke-width="1.5"/>
+<text x="803.0" y="528" font-size="13" font-weight="700" fill="#065F46" text-anchor="middle">Reply intake</text>
+<text x="797.0" y="548" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">Per-mailbox IMAP poll;</text>
+<text x="797.0" y="563" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">correlate, classify and</text>
+<text x="797.0" y="578" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">store (no automatic</text>
+<text x="797.0" y="593" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">follow-up for these leads)</text>
+<circle cx="720" cy="503" r="10" fill="#059669"/>
+<text x="720" y="507" font-size="11.5" font-weight="700" fill="#FFFFFF" text-anchor="middle">14</text>
+<rect x="965" y="502" width="184" height="106" rx="9" fill="#EFF6FF" stroke="#2563EB" stroke-width="1.5"/>
+<text x="1063.0" y="528" font-size="13" font-weight="700" fill="#1E3A8A" text-anchor="middle">Conversation view</text>
+<text x="1057.0" y="548" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">LeadBoost reads state and</text>
+<text x="1057.0" y="563" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">messages (read-only,</text>
+<text x="1057.0" y="578" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">bounded) and shows a</text>
+<text x="1057.0" y="593" font-size="11.5" font-weight="400" fill="#111827" text-anchor="middle">product-safe view</text>
+<circle cx="980" cy="503" r="10" fill="#2563EB"/>
+<text x="980" y="507" font-size="11.5" font-weight="700" fill="#FFFFFF" text-anchor="middle">15</text>
+<path d="M217,555.0 L239,555.0" fill="none" stroke="#374151" stroke-width="1.6" marker-end="url(#a)"/>
+<path d="M423,555.0 L499,555.0" fill="none" stroke="#374151" stroke-width="1.6" marker-end="url(#a)"/>
+<rect x="439.0" y="532.0" width="44.0" height="18" rx="4" fill="#FFFFFF" fill-opacity="0.94"/>
+<text x="461.0" y="545.0" font-size="11.5" font-weight="500" fill="#111827" text-anchor="middle">HTTPS</text>
+<path d="M683,555.0 L705,555.0" fill="none" stroke="#374151" stroke-width="1.6" marker-end="url(#a)"/>
+<path d="M889,555.0 L965,555.0" fill="none" stroke="#374151" stroke-width="1.6" stroke-dasharray="6 4" marker-end="url(#a)"/>
+<rect x="881.0" y="532.0" width="92.0" height="18" rx="4" fill="#FFFFFF" fill-opacity="0.94"/>
+<text x="927.0" y="545.0" font-size="11.5" font-weight="500" fill="#111827" text-anchor="middle">GET, read-only</text>
+<path d="M125.0,396 L125.0,502" fill="none" stroke="#374151" stroke-width="1.6" marker-end="url(#a)"/>
+<rect x="20" y="644" width="1140" height="34" rx="6" fill="#FFFBEB" stroke="#B45309" stroke-width="1.4" stroke-dasharray="5 3"/>
+<text x="30" y="662" font-size="12" font-weight="400" fill="#111827" text-anchor="start">Accepted (Mailer 202), sent (SMTP handoff) and delivered are three different facts. No stage observes delivery to the recipient's inbox.</text>
+<rect x="20" y="694" width="16" height="12" rx="3" fill="#EFF6FF" stroke="#2563EB" stroke-width="1.4"/>
+<text x="42" y="704" font-size="11.5" font-weight="400" fill="#4B5563" text-anchor="start">LeadBoost</text>
+<rect x="121.6" y="694" width="16" height="12" rx="3" fill="#ECFDF5" stroke="#059669" stroke-width="1.4"/>
+<text x="143.6" y="704" font-size="11.5" font-weight="400" fill="#4B5563" text-anchor="start">Mailer</text>
+<rect x="204.0" y="694" width="16" height="12" rx="3" fill="#FFFBEB" stroke="#B45309" stroke-width="1.4"/>
+<text x="226.0" y="704" font-size="11.5" font-weight="400" fill="#4B5563" text-anchor="start">Decision gate</text>
+</svg>

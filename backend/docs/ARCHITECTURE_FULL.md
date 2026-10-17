@@ -1,5 +1,13 @@
 # LeadBoost Backend — Full Architecture & Workflow Reference
 
+> **Status of this document.** Detailed design reference for the LeadBoost backend. It predates the
+> Mailer integration, so it does not cover it. Start with [`ARCHITECTURE.md`](ARCHITECTURE.md) (canonical
+> overview), [`SYSTEM_DESIGN.md`](SYSTEM_DESIGN.md) (end-to-end design) and
+> [`MAILER_INTEGRATION.md`](MAILER_INTEGRATION.md). Statements about schema management, background
+> execution and the benchmark size were corrected on 2026-10-16 to match the current code; for any other
+> disagreement, the code and tests win.
+
+
 > Code-grounded architecture document for `backend/`. Every claim below is traceable to real
 > files and functions; constants are quoted verbatim from source. `backend/scripts/` and
 > `backend/tests/` are intentionally excluded per scope.
@@ -803,7 +811,7 @@ regression query set and produces a report a human reviews; it is never invoked 
 ```
 discovery_eval/
 ├── README.md         -- usage, flags, what "good" looks like
-├── queries.py        -- ~100 fixed benchmark queries (id, query, domain, difficulty)
+├── queries.py        -- 113 fixed benchmark queries (id, query, domain, difficulty)
 ├── run_eval.py        -- the runner: `python -m discovery_eval.run_eval`
 ├── metrics.py         -- QueryRecord / BusinessRecord extraction + aggregate_metrics()
 ├── report.py          -- CSV / JSON / Markdown report writers
@@ -818,7 +826,7 @@ discovery_eval/
 stage methods** — `_search`, `_resolve_and_validate`, `_detect_duplicates`, plus the public
 `rank_businesses()` — the exact same sequence `discover_and_create_leads()` itself runs before it
 would ever create a Lead. It is constructed with `db=None` and never calls
-`discover_and_create_leads()` itself, so a full benchmark run (all ~100 queries):
+`discover_and_create_leads()` itself, so a full benchmark run (all 113 queries):
 
 - creates **no** Lead rows and spends **no** subscription/lead quota,
 - triggers **no** AI enrichment, scraper, or `LeadPipeline` run,
@@ -833,7 +841,7 @@ run is `discovery_eval/tests/`, the harness's own unit tests — pure-logic cove
 `metrics.py`/`report.py`/`charts.py` using synthetic, no-op stub records, needing no network, no
 DB, and no provider keys.
 
-### 9.2 The 100-query benchmark set — `queries.py`
+### 9.2 The 113-query benchmark set — `queries.py`
 
 Every query is plain text designed to parse under the real `QueryParser` (§6.3) — the same
 patterns a user's search box would receive. `domain` and `difficulty` are metadata for this
@@ -877,7 +885,7 @@ run into the run-level numbers `report.py` and `charts.py` both read.
 
 ```bash
 cd backend
-python -m discovery_eval.run_eval                 # full ~100-query benchmark
+python -m discovery_eval.run_eval                 # full 113-query benchmark
 python -m discovery_eval.run_eval --limit 10        # quick smoke run
 python -m discovery_eval.run_eval --concurrency 5   # override query concurrency
 ```
@@ -1162,8 +1170,8 @@ upgrade endpoint returns **402 "Online payments coming soon."**
 - `__init__.py`: `DATABASE_URL` **required** (raises if missing); production forces
   PostgreSQL. Pool: `pre_ping`, size **20**, overflow **40**, recycle **3600 s**, timeout
   **30 s**; `connect_timeout=10s`, `statement_timeout=30000ms`. `SessionLocal` with
-  `expire_on_commit=False`. `init_db` = `Base.metadata.create_all` — **no Alembic
-  migrations**. `get_db` yields a per-request session with rollback-on-error.
+  `expire_on_commit=False`. `init_db` = `Base.metadata.create_all` (adds missing tables only; schema *evolution* is managed by
+  Alembic, see `DEPLOYMENT.md`). `get_db` yields a per-request session with rollback-on-error.
 - `crud.py`: the only place raw queries live — User/Organization/Lead/APIKey/
   Subscription/Usage CRUD, `create_ai_decision_log`, `get_lead_by_url` (discovery dedup),
   scraping/enrichment log writers.
@@ -1221,7 +1229,7 @@ singleton aiohttp session. Parsed output feeds `normalization/normalizer.py`.
 | `normalization/normalizer.py` | `normalize_scraped_fields(raw)` — brand/legal name split, organization_type classification (generic 0.4 vs specific 0.9 confidence), email de-obfuscation, E.164 phone formatting, block-grouped addresses, social-link filtering, technology extraction, `text_excerpt` capped 5000 chars. **Additive only** — never removes scraped data |
 | `messaging/messenger.py` | Outreach **generation only — nothing is ever sent**. Needs ≥ 2 of 5 data points (company_name, industry, about > 50 chars, contact_name, employees) to use the LLM (temp 0.3, max_tokens 200, data-locked prompt); otherwise template fallback (industry-specific: software/consulting/ecommerce; generic; website-only). `MessageStyle`: professional / friendly / short |
 | `logging/__init__.py` | python-json-logger to stdout, `LOG_LEVEL` default INFO; helpers `get_logger`, `log_api_call`, `log_scraping_attempt`, `log_enrichment_attempt`. Request-id correlation lives in `main.py` middleware |
-| `workers/orchestrator.py` | Celery app `"leadboost_orchestrator"` (broker/backend default `redis://localhost:6379/0`), task `process_lead_task` (max_retries 3, delay 60 s) — **dormant: zero imports from `application/` or `api/`**; the pipeline runs in-process via BackgroundTasks instead |
+| `workers/orchestrator.py` | Celery app `"leadboost_orchestrator"` (broker/backend default `redis://localhost:6379/0`), task `process_lead_task` (max_retries 3, delay 60 s) — **dormant: zero imports from `application/` or `api/`**; the pipeline runs as durable `jobs` rows executed by the in-process job loop instead |
 
 ---
 
@@ -1323,8 +1331,9 @@ erDiagram
     }
 ```
 
-Schema management is `Base.metadata.create_all` at startup — additive only, **no
-Alembic**.
+`Base.metadata.create_all` still runs at startup but only adds missing tables. Schema changes are
+made through Alembic (`backend/alembic/`, five revisions, validated against PostgreSQL in CI); see
+`DEPLOYMENT.md` for the release procedure.
 
 ---
 
@@ -1344,7 +1353,7 @@ Every analyzed file in `backend/` (excluding `scripts/` and `tests/`) in one pla
 | File | Responsibility |
 |---|---|
 | `auth.py` | Register (atomic org+user+default plan), login (JWT pair), refresh, `/me` profile |
-| `leads.py` | Lead CRUD + batch create + `POST /{id}/process`; daily-limit enforcement (429); pipeline fan-out via BackgroundTasks |
+| `leads.py` | Lead CRUD + batch create + `POST /{id}/process`; daily-limit enforcement (429); pipeline fan-out via durable `LEAD_PIPELINE` jobs picked up by the in-process job loop |
 | `discovery.py` | `POST /discovery/search` — the natural-language entry to `DiscoveryService`; `QueryParseError`→422, other discovery errors→502 |
 | `billing.py` | Usage summary, plan list, upgrade (**402 stub**), cancel |
 | `analytics.py` | Pipeline / evaluation / discovery metric summaries via `AnalyticsService` |
@@ -1381,7 +1390,7 @@ Every analyzed file in `backend/` (excluding `scripts/` and `tests/`) in one pla
 
 | File | Responsibility |
 |---|---|
-| `queries.py` | ~100 fixed benchmark queries (id, query, domain tag, difficulty tag) |
+| `queries.py` | 113 fixed benchmark queries (id, query, domain tag, difficulty tag) |
 | `run_eval.py` | Runner -- drives `DiscoveryService`'s own internal stage methods as a black box, no DB writes, no quota spend |
 | `metrics.py` | `QueryRecord`/`BusinessRecord` extraction + `aggregate_metrics()` -- reads Discovery's own computed values, never recomputes them |
 | `report.py` | CSV / JSON / Markdown report writers |
@@ -1446,7 +1455,7 @@ graph TB
 
     DISC --> DSVC
     DSVC -->|fan-out| LPIPE
-    LEADS -->|BackgroundTasks| LPIPE
+    LEADS -->|jobs table + job loop| LPIPE
     LEADS --> SUBSVC & CRUD
     AUTHE --> SEC & CRUD
     BILLE --> SUBSVC
@@ -1651,10 +1660,10 @@ All verified in code — useful when extending the system:
 | 3 | Stripe webhook handlers for payment succeeded/failed are `pass`; metered usage commented out; placeholder price→plan map; **no webhook route registered** | `core/infrastructure/billing/stripe_service.py`, `main.py` |
 | 4 | `verify_api_key` matches by 8-char prefix only — full-hash verification is an explicit TODO | `core/infrastructure/auth/security.py` |
 | 5 | Subscription Pydantic schema (`plan_id`, `is_active`) mismatches the ORM (`plan_name`, `status`) | `core/domain/schemas/subscription.py` |
-| 6 | Celery orchestrator is dormant — zero imports; pipeline runs in-process via BackgroundTasks | `core/infrastructure/workers/orchestrator.py` |
+| 6 | Celery orchestrator is dormant — zero imports; pipelines run as durable `jobs` rows executed by the in-process job loop (`application/execution/worker_loop.py`) | `core/infrastructure/workers/orchestrator.py` |
 | 7 | Enrichment Tier 2 (external API) is a placeholder that always returns `None` | `core/infrastructure/enrichment/enricher.py` |
 | 8 | `brave_provider.py` exists but is superseded by Overpass + Serper in the active discovery flow | `application/discovery/providers/brave_provider.py` |
-| 9 | No Alembic migrations — schema managed by `create_all` (additive only) | `core/infrastructure/database/__init__.py` |
+| 9 | `create_all` still runs on startup (adds missing tables only); schema evolution is Alembic-managed, and applying migrations is a deliberate release step, not automatic | `core/infrastructure/database/__init__.py`, `backend/alembic/` |
 | 10 | `crm_history` in LeadContext is an always-empty extension point | `application/context/context_builder.py` |
 | 11 | Per-organization scoring configuration methods are stubs; `ScoringModelType` has unused variants | `core/domain/services/scoring.py` |
 | 12 | Messenger only generates outreach text — no email/LinkedIn sending exists anywhere | `core/infrastructure/messaging/messenger.py` |
@@ -1662,10 +1671,10 @@ All verified in code — useful when extending the system:
 | 14 | `DiscoveredBusiness.identity` (`VerifiedDigitalIdentity`) never reaches the API layer -- `DiscoveryResponse` / `LeadCreationOutcome` expose no identity/quality/risk fields, so a client can't see *why* a business ranked where it did | `application/discovery/dto.py` |
 | 15 | `identity.py`'s legacy `FeatureName`/`extract_features()` path still runs per candidate group but only feeds a secondary `identity_verification` cross-check -- `BusinessIdentity.confidence` itself comes entirely from the newer `features.py`/`confidence.py` engines | `application/discovery/identity.py` |
 | 16 | Most `EvidenceType` (7 of 15) and `RelationshipType` (6 of 9) members are defined but never constructed -- reserved for signals (schema.org, OpenGraph, contact-page presence) that need real page HTML only LeadPipeline's scrape downloads, which Discovery doesn't have at search time | `application/discovery/evidence.py`, `organization.py` |
-| 17 | `discovery_eval` is never wired into CI as a live benchmark (only its own unit tests are, §9/§18) -- running the ~100-query benchmark against production providers is a manual/on-demand step, not a merge gate | `discovery_eval/run_eval.py` |
+| 17 | `discovery_eval` is never wired into CI as a live benchmark (only its own unit tests are, §9/§18) -- running the 113-query benchmark against production providers is a manual/on-demand step, not a merge gate | `discovery_eval/run_eval.py` |
 | 18 | `ranking.py`'s three purely name/rating/review-derived signals (category match, rating, review count = 40 of 135 points) have no `VerifiedDigitalIdentity` equivalent yet -- only 5 of 8 scoring components are identity-aware | `application/discovery/ranking.py` |
 
 ---
 
-*Generated from direct source analysis. Companion docs: `ARCHITECTURE.md`,
+*Generated from direct source analysis. Companion docs: `OBSERVABILITY_AND_METRICS.md` (formerly `ARCHITECTURE.md`),
 `DISCOVERY.md`, `MONITORING.md`, `ENVIRONMENT.md` in this folder.*

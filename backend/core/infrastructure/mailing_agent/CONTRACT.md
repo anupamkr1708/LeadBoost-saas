@@ -115,6 +115,26 @@ LeadBoost GET /api/v2/outreach-actions/{action_id}/mailer-state      (customer-f
 * A mailbox created by the Mailer whose reference LeadBoost then lost, on an account that is *disabled before the
   next reconcile*, is not contacted (never provisioned ⇒ nothing to disable); it is adopted by e-mail the next time
   the account is activated, and until then a second ACTIVE mailbox makes the Mailer answer `409` (fail closed).
-* Deferred: implicit TLS (`SMTP_SSL`), automated tenant-key provisioning, `display_name` in the Mailer, IMAP /
-  inbound (M3), removing LeadBoost's own encrypted credential; **healing** LeadBoost's `DISPATCH_FAILED` from the Mailer's
+* Deferred: implicit TLS (`SMTP_SSL`), automated tenant-key provisioning, `display_name` in the Mailer, closing the
+  inbound provenance gap (webhook and legacy global poll), removing LeadBoost's own encrypted credential; **healing** LeadBoost's `DISPATCH_FAILED` from the Mailer's
   state (C9.3 only *displays* it).
+
+## Inbound mail (IMAP) — current behaviour
+
+An earlier revision of this contract listed IMAP / inbound (M3) as deferred. That entry is **historical**: the Mailer
+now receives replies itself.
+
+* **Where it runs.** The Mailer worker polls each ACTIVE mailbox that has a complete IMAP configuration (default every
+  120 s), using that mailbox's own encrypted credential. Nothing falls back to a deployment-global identity.
+* **How it is configured.** IMAP settings are an all-or-none set on the Mailer mailbox (`imap_host`, `imap_port`,
+  `imap_username`, `imap_password`), written through the Mailer API with the organization's key (see the Mailer's
+  `LEADBOOST_L1_MAILBOX_CONTRACT.md`). **LeadBoost never sends IMAP settings** and does not read the mailbox; a mailbox
+  without them is skipped by the poll.
+* **Tenant binding.** Tenant and mailbox come from the polled row, never from message content. Replies are correlated
+  within that organization and mailbox (RFC `In-Reply-To`/`References` first, otherwise a unique sender address);
+  ambiguous or unmatched mail is not persisted.
+* **What LeadBoost sees.** Only the read-only conversation view in section 3, restricted to mail received
+  through a mailbox owned by the organization. For LeadBoost-authorized contacts the Mailer stores and classifies
+  replies but does not send automatic follow-ups or auto-replies; a further email needs a new authorized action.
+* **Still outside the view.** Mail that arrived by webhook or through the legacy deployment-global poll has no provable
+  mailbox owner and stays excluded.

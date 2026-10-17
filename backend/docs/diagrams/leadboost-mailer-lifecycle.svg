@@ -1,0 +1,217 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1088 1813" width="1088" height="1813" role="img" aria-labelledby="t d" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+<title id="t">LeadBoost to Mailer outreach lifecycle</title><desc id="d">Swimlane sequence across six lanes: user and frontend, LeadBoost API, LeadBoost database and jobs, Mailer API, Mailer database and worker, and SMTP and IMAP. It covers sender verification and mailbox synchronization, outreach approval and dispatch, durable acceptance, message generation, SMTP sending, IMAP reply intake, and the read-only conversation view, with failure and unknown paths.</desc>
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#374151"/></marker><marker id="as" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#374151"/></marker><marker id="w" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#B45309"/></marker><marker id="ws" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#B45309"/></marker><marker id="e" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#B91C1C"/></marker><marker id="es" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#B91C1C"/></marker></defs>
+<rect width="1088" height="1813" fill="#FFFFFF"/>
+<text x="10" y="26" font-size="16" font-weight="700" fill="#111827" text-anchor="start">LeadBoost to Mailer outreach lifecycle</text>
+<text x="10" y="44" font-size="12" font-weight="400" fill="#4B5563" text-anchor="start">Accepted does not mean sent, and sent does not mean delivered. Dashed arrows are responses or polling.</text>
+<rect x="14" y="58" width="170" height="30" rx="6" fill="#DBEAFE" stroke="#2563EB" stroke-width="1.5"/>
+<text x="99.0" y="78" font-size="12.5" font-weight="700" fill="#1E3A8A" text-anchor="middle">User / frontend</text>
+<rect x="192" y="58" width="170" height="30" rx="6" fill="#DBEAFE" stroke="#2563EB" stroke-width="1.5"/>
+<text x="277.0" y="78" font-size="12.5" font-weight="700" fill="#1E3A8A" text-anchor="middle">LeadBoost API</text>
+<rect x="370" y="58" width="170" height="30" rx="6" fill="#DBEAFE" stroke="#2563EB" stroke-width="1.5"/>
+<text x="455.0" y="78" font-size="12.5" font-weight="700" fill="#1E3A8A" text-anchor="middle">LeadBoost DB + jobs</text>
+<rect x="548" y="58" width="170" height="30" rx="6" fill="#D1FAE5" stroke="#059669" stroke-width="1.5"/>
+<text x="633.0" y="78" font-size="12.5" font-weight="700" fill="#065F46" text-anchor="middle">Mailer API</text>
+<rect x="726" y="58" width="170" height="30" rx="6" fill="#D1FAE5" stroke="#059669" stroke-width="1.5"/>
+<text x="811.0" y="78" font-size="12.5" font-weight="700" fill="#065F46" text-anchor="middle">Mailer DB + worker</text>
+<rect x="904" y="58" width="170" height="30" rx="6" fill="#E5E7EB" stroke="#6B7280" stroke-width="1.5"/>
+<text x="989.0" y="78" font-size="12.5" font-weight="700" fill="#1F2937" text-anchor="middle">SMTP · IMAP</text>
+<line x1="99" y1="90" x2="99" y2="1709" stroke="#D1D5DB" stroke-width="1.2" stroke-dasharray="4 5"/>
+<line x1="277" y1="90" x2="277" y2="1709" stroke="#D1D5DB" stroke-width="1.2" stroke-dasharray="4 5"/>
+<line x1="455" y1="90" x2="455" y2="1709" stroke="#D1D5DB" stroke-width="1.2" stroke-dasharray="4 5"/>
+<line x1="633" y1="90" x2="633" y2="1709" stroke="#D1D5DB" stroke-width="1.2" stroke-dasharray="4 5"/>
+<line x1="811" y1="90" x2="811" y2="1709" stroke="#D1D5DB" stroke-width="1.2" stroke-dasharray="4 5"/>
+<line x1="989" y1="90" x2="989" y2="1709" stroke="#D1D5DB" stroke-width="1.2" stroke-dasharray="4 5"/>
+<rect x="10" y="120" width="1068" height="26" rx="5" fill="#F9FAFB" stroke="#D1D5DB"/>
+<text x="20" y="137" font-size="12.5" font-weight="700" fill="#111827" text-anchor="start">A · Sender setup</text>
+<text x="164" y="137" font-size="11.5" font-weight="400" fill="#4B5563" text-anchor="start">LeadBoost verifies the mailbox; the Mailer receives the credential only here</text>
+<rect x="10" y="582" width="1068" height="26" rx="5" fill="#F9FAFB" stroke="#D1D5DB"/>
+<text x="20" y="599" font-size="12.5" font-weight="700" fill="#111827" text-anchor="start">B · Authorize and dispatch</text>
+<text x="244" y="599" font-size="11.5" font-weight="400" fill="#4B5563" text-anchor="start">LeadBoost authorizes; it sends no credential and no message text</text>
+<rect x="10" y="1051" width="1068" height="26" rx="5" fill="#F9FAFB" stroke="#D1D5DB"/>
+<text x="20" y="1068" font-size="12.5" font-weight="700" fill="#111827" text-anchor="start">C · Generate and send</text>
+<text x="204" y="1068" font-size="11.5" font-weight="400" fill="#4B5563" text-anchor="start">Mailer worker only; never inside an HTTP request</text>
+<rect x="10" y="1263" width="1068" height="26" rx="5" fill="#F9FAFB" stroke="#D1D5DB"/>
+<text x="20" y="1280" font-size="12.5" font-weight="700" fill="#111827" text-anchor="start">D · Reply intake</text>
+<text x="164" y="1280" font-size="11.5" font-weight="400" fill="#4B5563" text-anchor="start">Per-mailbox IMAP poll; bound to the mailbox's organization</text>
+<rect x="10" y="1425" width="1068" height="26" rx="5" fill="#F9FAFB" stroke="#D1D5DB"/>
+<text x="20" y="1442" font-size="12.5" font-weight="700" fill="#111827" text-anchor="start">E · Read-only conversation view</text>
+<text x="284" y="1442" font-size="11.5" font-weight="400" fill="#4B5563" text-anchor="start">LeadBoost displays the Mailer's record; it never heals or retries from here</text>
+<path d="M103,216 L273,216" fill="none" stroke="#374151" stroke-width="1.6" marker-end="url(#a)"/>
+<rect x="125.3" y="181.0" width="145.3" height="14" fill="#FFFFFF" fill-opacity="0.92"/>
+<text x="198.0" y="192" font-size="11.5" font-weight="500" fill="#111827" text-anchor="middle">Create sender account</text>
+<rect x="125.3" y="194.0" width="145.3" height="14" fill="#FFFFFF" fill-opacity="0.92"/>
+<text x="198.0" y="205" font-size="11.5" font-weight="500" fill="#111827" text-anchor="middle">then verify it</text>
+<circle cx="117" cy="216" r="8.5" fill="#1F2937"/>
+<text x="117" y="220" font-size="10" font-weight="700" fill="#FFFFFF" text-anchor="middle">1</text>
+<path d="M281,265 L985,265" fill="none" stroke="#374151" stroke-width="1.6" marker-end="url(#a)"/>
+<rect x="503.6" y="243.0" width="278.7" height="14" fill="#FFFFFF" fill-opacity="0.92"/>
+<text x="643.0" y="254" font-size="11.5" font-weight="500" fill="#111827" text-anchor="middle">LeadBoost's own SMTP login test (STARTTLS)</text>
+<circle cx="295" cy="265" r="8.5" fill="#1F2937"/>
+<text x="295" y="269" font-size="10" font-weight="700" fill="#FFFFFF" text-anchor="middle">2</text>
+<path d="M281,327 L451,327" fill="none" stroke="#374151" stroke-width="1.6" marker-end="url(#a)"/>
+<rect x="284.3" y="292.0" width="183.4" height="14" fill="#FFFFFF" fill-opacity="0.92"/>
+<text x="376.0" y="303" font-size="11.5" font-weight="500" fill="#111827" text-anchor="middle">Save VERIFIED and</text>
+<rect x="284.3" y="305.0" width="183.4" height="14" fill="#FFFFFF" fill-opacity="0.92"/>
+<text x="376.0" y="316" font-size="11.5" font-weight="500" fill="#111827" text-anchor="middle">mailer_sync_state = pending</text>
+<circle cx="295" cy="327" r="8.5" fill="#1F2937"/>
+<text x="295" y="331" font-size="10" font-weight="700" fill="#FFFFFF" text-anchor="middle">3</text>
+<path d="M281,389 L629,389" fill="none" stroke="#374151" stroke-width="1.6" marker-end="url(#a)"/>
+<rect x="366.9" y="354.0" width="196.1" height="14" fill="#FFFFFF" fill-opacity="0.92"/>
+<text x="465.0" y="365" font-size="11.5" font-weight="500" fill="#111827" text-anchor="middle">Provision mailbox: credential</text>
+<rect x="366.9" y="367.0" width="196.1" height="14" fill="#FFFFFF" fill-opacity="0.92"/>
+<text x="465.0" y="378" font-size="11.5" font-weight="500" fill="#111827" text-anchor="middle">sent once, only in this call</text>
+<circle cx="295" cy="389" r="8.5" fill="#1F2937"/>
+<text x="295" y="393" font-size="10" font-weight="700" fill="#FFFFFF" text-anchor="middle">4</text>
+<path d="M637,451 L807,451" fill="none" stroke="#374151" stroke-width="1.6" marker-end="url(#a)"/>
+<rect x="656.1" y="416.0" width="151.7" height="14" fill="#FFFFFF" fill-opacity="0.92"/>
+<text x="732.0" y="427" font-size="11.5" font-weight="500" fill="#111827" text-anchor="middle">Mailbox stored ACTIVE;</text>
+<rect x="656.1" y="429.0" width="151.7" height="14" fill="#FFFFFF" fill-opacity="0.92"/>
+<text x="732.0" y="440" font-size="11.5" font-weight="500" fill="#111827" text-anchor="middle">credential encrypted</text>
+<circle cx="651" cy="451" r="8.5" fill="#1F2937"/>
+<text x="651" y="455" font-size="10" font-weight="700" fill="#FFFFFF" text-anchor="middle">5</text>
+<path d="M629,500 L281,500" fill="none" stroke="#374151" stroke-width="1.6" stroke-dasharray="6 4" marker-end="url(#a)"/>
+<rect x="405.0" y="478.0" width="119.9" height="14" fill="#FFFFFF" fill-opacity="0.92"/>
+<text x="465.0" y="489" font-size="11.5" font-weight="500" fill="#111827" text-anchor="middle">Mailbox reference</text>
+<circle cx="615" cy="500" r="8.5" fill="#1F2937"/>
+<text x="615" y="504" font-size="10" font-weight="700" fill="#FFFFFF" text-anchor="middle">6</text>
+<path d="M281,562 L451,562" fill="none" stroke="#374151" stroke-width="1.6" marker-end="url(#a)"/>
+<rect x="287.4" y="527.0" width="177.1" height="14" fill="#FFFFFF" fill-opacity="0.92"/>
+<text x="376.0" y="538" font-size="11.5" font-weight="500" fill="#111827" text-anchor="middle">Save reference;</text>
+<rect x="287.4" y="540.0" width="177.1" height="14" fill="#FFFFFF" fill-opacity="0.92"/>
+<text x="376.0" y="551" font-size="11.5" font-weight="500" fill="#111827" text-anchor="middle">mailer_sync_state = synced</text>
+<circle cx="295" cy="562" r="8.5" fill="#1F2937"/>
+<text x="295" y="566" font-size="10" font-weight="700" fill="#FFFFFF" text-anchor="middle">7</text>
+<rect x="18" y="337" width="162" height="101.5" rx="6" fill="#FFFBEB" stroke="#B45309" stroke-width="1.4" stroke-dasharray="5 3"/>
+<text x="26" y="354" font-size="11.5" font-weight="700" fill="#78350F" text-anchor="start">If the Mailer call fails</text>
+<text x="26" y="370.0" font-size="11" font-weight="400" fill="#111827" text-anchor="start">Stays 'pending' with a safe</text>
+<text x="26" y="383.5" font-size="11" font-weight="400" fill="#111827" text-anchor="start">error code. Dispatch is</text>
+<text x="26" y="397.0" font-size="11" font-weight="400" fill="#111827" text-anchor="start">refused until a retry</text>
+<text x="26" y="410.5" font-size="11" font-weight="400" fill="#111827" text-anchor="start">converges (verify again, or</text>
+<text x="26" y="424.0" font-size="11" font-weight="400" fill="#111827" text-anchor="start">POST .../mailer-sync).</text>
+<path d="M103,678 L273,678" fill="none" stroke="#374151" stroke-width="1.6" marker-end="url(#a)"/>
+<rect x="109.5" y="643.0" width="177.1" height="14" fill="#FFFFFF" fill-opacity="0.92"/>
+<text x="198.0" y="654" font-size="11.5" font-weight="500" fill="#111827" text-anchor="middle">Create outreach action</text>
+<rect x="109.5" y="656.0" width="177.1" height="14" fill="#FFFFFF" fill-opacity="0.92"/>
+<text x="198.0" y="667" font-size="11.5" font-weight="500" fill="#111827" text-anchor="middle">(idempotency key), approve</text>
+<circle cx="117" cy="678" r="8.5" fill="#1F2937"/>
+<text x="117" y="682" font-size="10" font-weight="700" fill="#FFFFFF" text-anchor="middle">8</text>
+<path d="M281,727 L451,727" fill="none" stroke="#374151" stroke-width="1.6" marker-end="url(#a)"/>
+<rect x="287.4" y="705.0" width="177.1" height="14" fill="#FFFFFF" fill-opacity="0.92"/>
+<text x="376.0" y="716" font-size="11.5" font-weight="500" fill="#111827" text-anchor="middle">pending_review -&gt; approved</text>
+<circle cx="295" cy="727" r="8.5" fill="#1F2937"/>
+<text x="295" y="731" font-size="10" font-weight="700" fill="#FFFFFF" text-anchor="middle">9</text>
+<path d="M103,761 L273,761" fill="none" stroke="#374151" stroke-width="1.6" marker-end="url(#a)"/>
+<rect x="166.6" y="739.0" width="62.8" height="14" fill="#FFFFFF" fill-opacity="0.92"/>
+<text x="198.0" y="750" font-size="11.5" font-weight="500" fill="#111827" text-anchor="middle">Dispatch</text>
+<circle cx="117" cy="761" r="8.5" fill="#1F2937"/>
+<text x="117" y="765" font-size="10" font-weight="700" fill="#FFFFFF" text-anchor="middle">10</text>
+<path d="M281,823 L451,823" fill="none" stroke="#374151" stroke-width="1.6" marker-end="url(#a)"/>
+<rect x="287.4" y="788.0" width="177.1" height="14" fill="#FFFFFF" fill-opacity="0.92"/>
+<text x="376.0" y="799" font-size="11.5" font-weight="500" fill="#111827" text-anchor="middle">approved -&gt; dispatching</text>
+<rect x="287.4" y="801.0" width="177.1" height="14" fill="#FFFFFF" fill-opacity="0.92"/>
+<text x="376.0" y="812" font-size="11.5" font-weight="500" fill="#111827" text-anchor="middle">(atomic claim; one winner)</text>
+<circle cx="295" cy="823" r="8.5" fill="#1F2937"/>
+<text x="295" y="827" font-size="10" font-weight="700" fill="#FFFFFF" text-anchor="middle">11</text>
+<path d="M281,871 L629,871" fill="none" stroke="#374151" stroke-width="1.6" marker-end="url(#a)"/>
+<rect x="338.4" y="836.0" width="253.3" height="14" fill="#FFFFFF" fill-opacity="0.92"/>
+<text x="465.0" y="847" font-size="11.5" font-weight="500" fill="#111827" text-anchor="middle">POST .../outreach-requests: recipient +</text>
+<rect x="338.4" y="849.0" width="253.3" height="14" fill="#FFFFFF" fill-opacity="0.92"/>
+<text x="465.0" y="860" font-size="11.5" font-weight="500" fill="#111827" text-anchor="middle">business context, same idempotency key</text>
+<circle cx="295" cy="871" r="8.5" fill="#1F2937"/>
+<text x="295" y="875" font-size="10" font-weight="700" fill="#FFFFFF" text-anchor="middle">12</text>
+<path d="M637,933 L807,933" fill="none" stroke="#374151" stroke-width="1.6" marker-end="url(#a)"/>
+<rect x="640.3" y="898.0" width="183.4" height="14" fill="#FFFFFF" fill-opacity="0.92"/>
+<text x="732.0" y="909" font-size="11.5" font-weight="500" fill="#111827" text-anchor="middle">One commit: dispatch QUEUED</text>
+<rect x="640.3" y="911.0" width="183.4" height="14" fill="#FFFFFF" fill-opacity="0.92"/>
+<text x="732.0" y="922" font-size="11.5" font-weight="500" fill="#111827" text-anchor="middle">(durable acceptance)</text>
+<circle cx="651" cy="933" r="8.5" fill="#1F2937"/>
+<text x="651" y="937" font-size="10" font-weight="700" fill="#FFFFFF" text-anchor="middle">13</text>
+<path d="M629,982 L281,982" fill="none" stroke="#B45309" stroke-width="1.6" stroke-dasharray="6 4" marker-end="url(#w)"/>
+<rect x="376.4" y="960.0" width="177.1" height="14" fill="#FFFFFF" fill-opacity="0.92"/>
+<text x="465.0" y="971" font-size="11.5" font-weight="700" fill="#78350F" text-anchor="middle">202 accepted: NOT sent yet</text>
+<circle cx="615" cy="982" r="8.5" fill="#1F2937"/>
+<text x="615" y="986" font-size="10" font-weight="700" fill="#FFFFFF" text-anchor="middle">14</text>
+<path d="M281,1031 L451,1031" fill="none" stroke="#374151" stroke-width="1.6" marker-end="url(#a)"/>
+<rect x="293.8" y="1009.0" width="164.4" height="14" fill="#FFFFFF" fill-opacity="0.92"/>
+<text x="376.0" y="1020" font-size="11.5" font-weight="500" fill="#111827" text-anchor="middle">dispatching -&gt; submitted</text>
+<circle cx="295" cy="1031" r="8.5" fill="#1F2937"/>
+<text x="295" y="1035" font-size="10" font-weight="700" fill="#FFFFFF" text-anchor="middle">15</text>
+<rect x="18" y="787" width="162" height="115.0" rx="6" fill="#FFFBEB" stroke="#B45309" stroke-width="1.4" stroke-dasharray="5 3"/>
+<text x="26" y="804" font-size="11.5" font-weight="700" fill="#78350F" text-anchor="start">Acceptance unclear</text>
+<text x="26" y="820.0" font-size="11" font-weight="400" fill="#111827" text-anchor="start">Timeout, 5xx, 409 or bad</text>
+<text x="26" y="833.5" font-size="11" font-weight="400" fill="#111827" text-anchor="start">reply: dispatch_failed with</text>
+<text x="26" y="847.0" font-size="11" font-weight="400" fill="#111827" text-anchor="start">a safe code. A retry sends</text>
+<text x="26" y="860.5" font-size="11" font-weight="400" fill="#111827" text-anchor="start">the SAME key; the Mailer</text>
+<text x="26" y="874.0" font-size="11" font-weight="400" fill="#111827" text-anchor="start">replays the first operation</text>
+<text x="26" y="887.5" font-size="11" font-weight="400" fill="#111827" text-anchor="start">and creates no second one.</text>
+<rect x="730" y="1105" width="162" height="42" rx="6" fill="#ECFDF5" stroke="#059669" stroke-width="1.5"/>
+<text x="811.0" y="1123" font-size="11" font-weight="400" fill="#111827" text-anchor="middle">Claim dispatch; generate a</text>
+<text x="811.0" y="1137" font-size="11" font-weight="400" fill="#111827" text-anchor="middle">message (LLM + grounding)</text>
+<path d="M815,1183 L985,1183" fill="none" stroke="#374151" stroke-width="1.6" marker-end="url(#a)"/>
+<rect x="840.5" y="1161.0" width="139.0" height="14" fill="#FFFFFF" fill-opacity="0.92"/>
+<text x="910.0" y="1172" font-size="11.5" font-weight="500" fill="#111827" text-anchor="middle">SMTP send (STARTTLS)</text>
+<circle cx="829" cy="1183" r="8.5" fill="#1F2937"/>
+<text x="829" y="1187" font-size="10" font-weight="700" fill="#FFFFFF" text-anchor="middle">16</text>
+<rect x="730" y="1201" width="162" height="42" rx="6" fill="#ECFDF5" stroke="#059669" stroke-width="1.5"/>
+<text x="811.0" y="1219" font-size="11" font-weight="400" fill="#111827" text-anchor="middle">Record SENT, FAILED</text>
+<text x="811.0" y="1233" font-size="11" font-weight="400" fill="#111827" text-anchor="middle">or UNKNOWN</text>
+<rect x="552" y="1099" width="162" height="115.0" rx="6" fill="#FFFBEB" stroke="#B45309" stroke-width="1.4" stroke-dasharray="5 3"/>
+<text x="560" y="1116" font-size="11.5" font-weight="700" fill="#78350F" text-anchor="start">Outcomes</text>
+<text x="560" y="1132.0" font-size="11" font-weight="400" fill="#111827" text-anchor="start">LLM error or blocked draft:</text>
+<text x="560" y="1145.5" font-size="11" font-weight="400" fill="#111827" text-anchor="start">FAILED, nothing is sent.</text>
+<text x="560" y="1159.0" font-size="11" font-weight="400" fill="#111827" text-anchor="start">Ambiguous SMTP result:</text>
+<text x="560" y="1172.5" font-size="11" font-weight="400" fill="#111827" text-anchor="start">UNKNOWN, never auto-resent.</text>
+<text x="560" y="1186.0" font-size="11" font-weight="400" fill="#111827" text-anchor="start">Only a confirmed SMTP</text>
+<text x="560" y="1199.5" font-size="11" font-weight="400" fill="#111827" text-anchor="start">handoff is SENT.</text>
+<path d="M985,1331 L815,1331" fill="none" stroke="#374151" stroke-width="1.6" stroke-dasharray="6 4" marker-end="url(#a)"/>
+<rect x="837.3" y="1309.0" width="145.3" height="14" fill="#FFFFFF" fill-opacity="0.92"/>
+<text x="910.0" y="1320" font-size="11.5" font-weight="500" fill="#111827" text-anchor="middle">IMAP poll finds reply</text>
+<circle cx="971" cy="1331" r="8.5" fill="#1F2937"/>
+<text x="971" y="1335" font-size="10" font-weight="700" fill="#FFFFFF" text-anchor="middle">17</text>
+<rect x="730" y="1349" width="162" height="56" rx="6" fill="#ECFDF5" stroke="#059669" stroke-width="1.5"/>
+<text x="811.0" y="1367" font-size="11" font-weight="400" fill="#111827" text-anchor="middle">Correlate to the contact,</text>
+<text x="811.0" y="1381" font-size="11" font-weight="400" fill="#111827" text-anchor="middle">store, classify, update</text>
+<text x="811.0" y="1395" font-size="11" font-weight="400" fill="#111827" text-anchor="middle">state (no auto-send)</text>
+<rect x="552" y="1343" width="162" height="61.0" rx="6" fill="#F3F4F6" stroke="#6B7280" stroke-width="1.4" stroke-dasharray="5 3"/>
+<text x="560" y="1360" font-size="11.5" font-weight="700" fill="#1F2937" text-anchor="start">Excluded from the view</text>
+<text x="560" y="1376.0" font-size="11" font-weight="400" fill="#111827" text-anchor="start">Mail with no provable</text>
+<text x="560" y="1389.5" font-size="11" font-weight="400" fill="#111827" text-anchor="start">mailbox owner is not shown.</text>
+<path d="M103,1521 L273,1521" fill="none" stroke="#374151" stroke-width="1.6" marker-end="url(#a)"/>
+<rect x="134.8" y="1486.0" width="126.3" height="14" fill="#FFFFFF" fill-opacity="0.92"/>
+<text x="198.0" y="1497" font-size="11.5" font-weight="500" fill="#111827" text-anchor="middle">Open outreach:</text>
+<rect x="134.8" y="1499.0" width="126.3" height="14" fill="#FFFFFF" fill-opacity="0.92"/>
+<text x="198.0" y="1510" font-size="11.5" font-weight="500" fill="#111827" text-anchor="middle">GET .../mailer-state</text>
+<circle cx="117" cy="1521" r="8.5" fill="#1F2937"/>
+<text x="117" y="1525" font-size="10" font-weight="700" fill="#FFFFFF" text-anchor="middle">18</text>
+<path d="M281,1569 L629,1569" fill="none" stroke="#374151" stroke-width="1.6" marker-end="url(#a)"/>
+<rect x="373.3" y="1534.0" width="183.4" height="14" fill="#FFFFFF" fill-opacity="0.92"/>
+<text x="465.0" y="1545" font-size="11.5" font-weight="500" fill="#111827" text-anchor="middle">GET .../conversation?limit=20</text>
+<rect x="373.3" y="1547.0" width="183.4" height="14" fill="#FFFFFF" fill-opacity="0.92"/>
+<text x="465.0" y="1558" font-size="11.5" font-weight="500" fill="#111827" text-anchor="middle">(read-only, bounded window)</text>
+<circle cx="295" cy="1569" r="8.5" fill="#1F2937"/>
+<text x="295" y="1573" font-size="10" font-weight="700" fill="#FFFFFF" text-anchor="middle">19</text>
+<path d="M629,1631 L281,1631" fill="none" stroke="#374151" stroke-width="1.6" stroke-dasharray="6 4" marker-end="url(#a)"/>
+<rect x="382.8" y="1596.0" width="164.4" height="14" fill="#FFFFFF" fill-opacity="0.92"/>
+<text x="465.0" y="1607" font-size="11.5" font-weight="500" fill="#111827" text-anchor="middle">Dispatch state +</text>
+<rect x="382.8" y="1609.0" width="164.4" height="14" fill="#FFFFFF" fill-opacity="0.92"/>
+<text x="465.0" y="1620" font-size="11.5" font-weight="500" fill="#111827" text-anchor="middle">messages (strict schema)</text>
+<circle cx="615" cy="1631" r="8.5" fill="#1F2937"/>
+<text x="615" y="1635" font-size="10" font-weight="700" fill="#FFFFFF" text-anchor="middle">20</text>
+<path d="M273,1693 L103,1693" fill="none" stroke="#374151" stroke-width="1.6" stroke-dasharray="6 4" marker-end="url(#a)"/>
+<rect x="106.3" y="1658.0" width="183.4" height="14" fill="#FFFFFF" fill-opacity="0.92"/>
+<text x="198.0" y="1669" font-size="11.5" font-weight="500" fill="#111827" text-anchor="middle">Product view: availability,</text>
+<rect x="106.3" y="1671.0" width="183.4" height="14" fill="#FFFFFF" fill-opacity="0.92"/>
+<text x="198.0" y="1682" font-size="11.5" font-weight="500" fill="#111827" text-anchor="middle">state, plain-text messages</text>
+<circle cx="259" cy="1693" r="8.5" fill="#1F2937"/>
+<text x="259" y="1697" font-size="10" font-weight="700" fill="#FFFFFF" text-anchor="middle">21</text>
+<rect x="730" y="1603" width="340" height="88.0" rx="6" fill="#FFFBEB" stroke="#B45309" stroke-width="1.4" stroke-dasharray="5 3"/>
+<text x="738" y="1620" font-size="11.5" font-weight="700" fill="#78350F" text-anchor="start">Mailer unavailable</text>
+<text x="738" y="1636.0" font-size="11" font-weight="400" fill="#111827" text-anchor="start">404, timeout, 5xx or schema</text>
+<text x="738" y="1649.5" font-size="11" font-weight="400" fill="#111827" text-anchor="start">drift: reported as an</text>
+<text x="738" y="1663.0" font-size="11" font-weight="400" fill="#111827" text-anchor="start">availability flag, HTTP 200.</text>
+<text x="738" y="1676.5" font-size="11" font-weight="400" fill="#111827" text-anchor="start">Nothing is retried or healed.</text>
+<rect x="10" y="1717" width="1068" height="62" rx="8" fill="#FFFBEB" stroke="#B45309" stroke-width="1.8"/>
+<text x="24" y="1739" font-size="12.5" font-weight="700" fill="#78350F" text-anchor="start">Accepted, sent and delivered are three different facts: durably queued, SMTP handoff succeeded, and received.</text>
+<text x="24" y="1759" font-size="11.5" font-weight="400" fill="#111827" text-anchor="start">No step in this flow observes delivery to the recipient's inbox. UNKNOWN means delivery is unconfirmed, not failed; the UI says not to resend.</text>
+</svg>

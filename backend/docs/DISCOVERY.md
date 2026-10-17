@@ -1,5 +1,14 @@
 # Business Discovery Layer
 
+> **Status note (2026-10-16).** This document describes the discovery layer's original design. The active
+> defaults in `application/discovery/discovery_service.py` are: Overpass as the primary business-search provider,
+> a **Serper** web-search provider as the fallback whenever Overpass returns zero candidates (for any category),
+> and **Serper** as the default website-resolution fallback. Brave remains available by injection but is not the
+> default. Identity resolution has since grown into a multi-stage pipeline (evidence, features, verification,
+> confidence, identity resolution); see [`SYSTEM_DESIGN.md`](SYSTEM_DESIGN.md) §5 and `ARCHITECTURE_FULL.md`.
+> Where the two disagree, the code wins.
+
+
 Sits *before* the existing, unmodified `LeadPipeline`. Turns a natural
 -language business search ("Top shoe stores in Mumbai") into validated
 `Lead` rows that are handed to `LeadPipeline.execute()` exactly the way
