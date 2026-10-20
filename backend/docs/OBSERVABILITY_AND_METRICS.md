@@ -222,6 +222,14 @@ by the API layer from the authenticated user) and an optional `since`
 timestamp. The Analytics API's `?hours=N` query parameter is a thin
 convenience over `since`.
 
+* `hours` is an optional **integer from 1 to 8760 (one year)**; omit it for
+  all-time. Zero, negative, non-integer or larger values are ordinary `422`
+  validation errors. (The frontend's widest explicit window is 30 days, 720h.)
+* The API layer refuses a user with **no organization** (`403`,
+  `Organization context required`). `organization_id=None` means "no filter"
+  inside `AnalyticsService` — that is what the operator-only `/metrics` route
+  uses — so it must never be reachable from a customer request.
+
 ---
 
 ## 6. Analytics API

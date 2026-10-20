@@ -24,7 +24,8 @@ No customer content is ever recorded as a metric or label (no emails,
 no prompts, no business names/URLs) -- only counts, durations, and status
 codes, per the brief's explicit privacy requirement. Route labels use the
 matched route *template* (e.g. "/leads/{lead_id}"), never the raw path,
-to avoid unbounded label cardinality from path parameters.
+to avoid unbounded label cardinality from path parameters; unmatched paths
+share one constant label and non-standard HTTP methods share "OTHER".
 """
 
 from datetime import datetime, timedelta
@@ -95,16 +96,33 @@ organizations_total = Gauge("organizations_total", "Total organizations", regist
 leads_total = Gauge("leads_total", "Total leads across all organizations", registry=REGISTRY)
 
 
+# Fixed label values. Every client-controlled input that becomes a Prometheus label must
+# map into a finite set, otherwise anonymous requests (unknown URLs, odd HTTP methods) can
+# create unbounded time series.
+UNMATCHED_ROUTE_LABEL = "__unmatched__"
+OTHER_METHOD_LABEL = "OTHER"
+_KNOWN_METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
+
+
 def route_template(request) -> str:
-    """The matched route's path *template* (e.g. "/leads/{lead_id}"),
-    falling back to the raw path only if routing hasn't resolved (e.g. a
-    404 for a path with no matching route at all) -- keeps the `path`
-    label's cardinality bounded to the number of routes, not the number
-    of distinct IDs ever requested."""
+    """The matched route's path *template* (e.g. "/leads/{lead_id}"), or the
+    constant "__unmatched__" when routing resolved no route (e.g. a 404 for a
+    path with no matching route at all). The raw request path is NEVER used as
+    a label: the `path` label's cardinality is bounded by the number of
+    registered routes plus one, no matter how many distinct URLs are requested."""
     route = request.scope.get("route")
-    if route is not None and hasattr(route, "path"):
-        return route.path
-    return request.url.path
+    path = getattr(route, "path", None) if route is not None else None
+    if isinstance(path, str) and path:
+        return path
+    return UNMATCHED_ROUTE_LABEL
+
+
+def method_label(request) -> str:
+    """The HTTP method if it is a standard one, else "OTHER". The method token is
+    client-controlled (an HTTP server accepts arbitrary tokens), so it is bounded the
+    same way the path is."""
+    method = (request.method or "").upper()
+    return method if method in _KNOWN_METHODS else OTHER_METHOD_LABEL
 
 
 def refresh_periodic_gauges(db: Session, lookback_hours: int = 24) -> None:

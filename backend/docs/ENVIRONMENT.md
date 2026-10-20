@@ -45,13 +45,15 @@ has minimal friction.
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | `60` | |
 | `REFRESH_TOKEN_EXPIRE_DAYS` | `7` | |
 | `ALLOWED_ORIGINS` | *(required in prod)* | CORS allowlist, comma-separated. |
+| `METRICS_BEARER_TOKEN` | *(unset = `/metrics` disabled)* | **Secret.** Dedicated bearer token for the operator-only global Prometheus route `GET /metrics`. At least 32 random characters, no surrounding whitespace, and different from `SECRET_KEY`, `EMAIL_CREDENTIAL_ENCRYPTION_KEY`, any Mailer tenant key and the other secrets; otherwise the route stays disabled (`403`) and startup logs the reason (never the value). Unset = `403` for everyone — the correct setting when nothing scrapes the endpoint. Provision only through the platform's secret store; never in the frontend, a URL or source control. See `docs/MONITORING.md`. |
+| `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD` | `admin` / **required, no default** | Self-hosted `docker-compose.prod.yml` stack only: the Grafana administrator account. Compose refuses to start Grafana without a password. |
 
 ## Mailer integration (active; read from the process environment by `core/infrastructure/mailing_agent/client.py`)
 
 | Variable | Required | Notes |
 |---|---|---|
 | `MAILING_AGENT_BASE_URL` | yes, for any dispatch | Deployed Mailer API base URL. `https://` only (plain `http://` is accepted for loopback hosts only; anything else fails closed with `INSECURE_TRANSPORT`). Unset -> `NOT_CONFIGURED`. |
-| `MAILING_AGENT_ORG_API_KEYS` | yes, for any dispatch | **Secret.** JSON object `{"<leadboost_org_id>": "<mailer_api_key>"}`, one key per LeadBoost organization. The Mailer's `ORG_KEY_MAP` is the inverse (`{"<key>": "<org_id>"}`); the two must agree. A missing organization -> `AUTH_NOT_CONFIGURED`; invalid JSON / non-object -> logged, no keys usable. |
+| `MAILING_AGENT_ORG_API_KEYS` | yes, for any dispatch | **Secret.** JSON object `{"<leadboost_org_id>": "<mailer_api_key>"}`, one key per LeadBoost organization. The Mailer's `ORG_KEY_MAP` is the inverse (`{"<key>": "<org_id>"}`); the two must agree. A missing organization -> `AUTH_NOT_CONFIGURED`; invalid JSON / non-object -> logged, no keys usable. **Each organization must have a distinct key:** the same non-empty key (compared after trimming whitespace) mapped to two organizations, or the same organization entry repeated, is rejected as a whole — no organization gets a key, calls fail closed with `AUTH_NOT_CONFIGURED`, and startup logs a value-free warning. |
 | `MAILING_AGENT_TIMEOUT_SECONDS` | no | Positive number; default `15`. |
 
 `MAILER_AGENT_BASE_URL` and `MAILING_AGENT_API_KEY` are not read anywhere.

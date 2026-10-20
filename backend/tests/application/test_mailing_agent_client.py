@@ -329,3 +329,107 @@ class TestTransport:
         seen, _ = wire
         await send_request("GET", "/mailboxes", organization_id=ORG)
         assert seen[0].content == b"" and "content-type" not in seen[0].headers
+
+
+# --------------------------------------------------------------------------
+# Key-VALUE uniqueness: two organizations must never share one Mailer tenant key
+# --------------------------------------------------------------------------
+class TestOrganizationKeyUniqueness:
+    SHARED = "shared-mailer-key-do-not-log"
+
+    def _set(self, monkeypatch, mapping):
+        raw = mapping if isinstance(mapping, str) else json.dumps(mapping)
+        monkeypatch.setenv("MAILING_AGENT_ORG_API_KEYS", raw)
+
+    def test_distinct_valid_keys_still_resolve_exactly_as_before(self, monkeypatch):
+        self._set(monkeypatch, {"7": "k7", "8": "k8", "9": "k9"})
+        assert (org_api_key(7), org_api_key(8), org_api_key(9)) == ("k7", "k8", "k9")
+        assert org_api_key(10) is None  # missing organization mapping
+
+    def test_same_key_for_two_organizations_fails_closed_for_every_organization(self, monkeypatch):
+        self._set(monkeypatch, {"7": self.SHARED, "8": self.SHARED, "9": "unrelated-key"})
+        # Rejected as a whole: neither colliding org, and not the innocent one either.
+        assert org_api_key(7) is None and org_api_key(8) is None and org_api_key(9) is None
+
+    def test_whitespace_difference_does_not_hide_a_duplicate(self, monkeypatch):
+        # HTTP header values are whitespace-trimmed in transit: these are the same credential.
+        self._set(monkeypatch, {"7": self.SHARED, "8": f"  {self.SHARED}\t"})
+        assert org_api_key(7) is None and org_api_key(8) is None
+
+    def test_different_case_is_a_different_key(self, monkeypatch):
+        self._set(monkeypatch, {"7": "AbCdEf-key", "8": "abcdef-key"})
+        assert org_api_key(7) == "AbCdEf-key" and org_api_key(8) == "abcdef-key"
+
+    def test_repeated_organization_entry_is_rejected_not_silently_last_wins(self, monkeypatch):
+        self._set(monkeypatch, '{"7": "first-key", "7": "second-key"}')
+        assert org_api_key(7) is None
+
+    def test_blank_and_non_string_values_are_not_keys_so_cannot_collide(self, monkeypatch):
+        self._set(monkeypatch, {"7": "", "8": "", "9": "   ", "10": 5, "11": 5, "12": None, "13": None})
+        assert [org_api_key(o) for o in (7, 8, 9, 10, 11, 12, 13)] == [None] * 7
+        assert mc.org_api_keys_config_problem() is None  # per-entry blanks are not a config error
+
+    def test_one_valid_org_next_to_a_blank_entry_still_works(self, monkeypatch):
+        self._set(monkeypatch, {"7": "k7", "8": ""})
+        assert org_api_key(7) == "k7" and org_api_key(8) is None
+
+    @pytest.mark.parametrize(
+        "raw, expected",
+        [
+            ('{"7": "a", "8": "a"}', mc.KEY_MAP_DUPLICATE_KEY_VALUE),
+            ('{"7": "a", "7": "b"}', mc.KEY_MAP_DUPLICATE_ORG_ENTRY),
+            ("not json", mc.KEY_MAP_INVALID_JSON),
+            ("[]", mc.KEY_MAP_NOT_AN_OBJECT),
+            ('"just-a-string"', mc.KEY_MAP_NOT_AN_OBJECT),
+            ('{"7": "a", "8": "b"}', None),
+            ("", None),
+            ("   ", None),
+        ],
+    )
+    def test_config_problem_reports_a_fixed_value_free_reason_code(self, monkeypatch, raw, expected):
+        monkeypatch.setenv("MAILING_AGENT_ORG_API_KEYS", raw)
+        assert mc.org_api_keys_config_problem() == expected
+
+    def test_config_problem_is_none_when_unset(self, monkeypatch):
+        monkeypatch.delenv("MAILING_AGENT_ORG_API_KEYS", raising=False)
+        assert mc.org_api_keys_config_problem() is None
+
+    def test_rejection_is_logged_without_keys_org_ids_or_json(self, monkeypatch, caplog):
+        self._set(monkeypatch, {"7": self.SHARED, "8": self.SHARED})
+        with caplog.at_level("DEBUG"):
+            org_api_key(7)
+        messages = [r.getMessage() for r in caplog.records if r.name == mc.logger.name]
+        assert messages == [
+            "MAILING_AGENT_ORG_API_KEYS maps the same Mailer API key to more than one organization; "
+            "no Mailer keys are usable"
+        ]  # fixed text only: no key, no organization id, no JSON
+        assert self.SHARED not in caplog.text
+
+    def test_duplicate_literal_entry_rejection_does_not_log_either_key(self, monkeypatch, caplog):
+        self._set(monkeypatch, '{"7": "first-secret-aaa", "7": "second-secret-bbb"}')
+        with caplog.at_level("DEBUG"):
+            org_api_key(7)
+        assert "first-secret-aaa" not in caplog.text and "second-secret-bbb" not in caplog.text
+
+    async def test_send_request_with_a_duplicate_map_makes_no_network_call(self, wire, monkeypatch):
+        seen, _ = wire
+        self._set(monkeypatch, {str(ORG): self.SHARED, "8": self.SHARED})
+
+        res = await submit_generated_outreach(**_kwargs())
+
+        assert res.error_code == DispatchErrorCode.AUTH_NOT_CONFIGURED
+        assert seen == []  # fail closed BEFORE any request, so no key is ever presented
+
+    async def test_send_request_recovers_once_the_duplicate_is_removed(self, wire, monkeypatch):
+        seen, _ = wire
+        self._set(monkeypatch, {str(ORG): "key-for-seven", "8": "key-for-eight"})
+
+        res = await submit_generated_outreach(**_kwargs())
+
+        assert res.accepted is True and res.error_code is None
+        assert seen[0].headers["x-api-key"] == "key-for-seven"
+
+    def test_external_format_is_unchanged_org_id_to_key(self, monkeypatch):
+        # {"<leadboost_org_id>": "<mailer_tenant_api_key>"} -- the inverse of Mailer's ORG_KEY_MAP.
+        self._set(monkeypatch, {"42": "tenant-key-42"})
+        assert org_api_key(42) == "tenant-key-42"

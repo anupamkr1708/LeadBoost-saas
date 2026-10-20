@@ -211,7 +211,7 @@ sequenceDiagram
 | `GET /health` | DB `SELECT 1` + Redis ping (URL from `CELERY_BROKER_URL`, default `redis://localhost:6379/0`); **503** if either unhealthy |
 | `GET /ready` | readiness probe |
 | `GET /live` | liveness probe |
-| `GET /metrics` | **Unauthenticated by design**; `prometheus_metrics.render_latest(db)` — refreshes scrape-time gauges then renders |
+| `GET /metrics` | **Owner/operator only**: dedicated `METRICS_BEARER_TOKEN` (`core/infrastructure/auth/metrics_token.py`) — `403` when unset/unusable, `401` when the credential is missing or wrong, checked before a DB session opens; then `prometheus_metrics.render_latest(db)` — refreshes scrape-time gauges then renders. See `docs/MONITORING.md` |
 
 ### 3.4 Server & routers
 

@@ -104,6 +104,28 @@ def validate_startup_environment() -> None:
         logger.error(message)
         raise RuntimeError(message)
 
+    # Misconfigurations that fail CLOSED at request time (never insecure) but would otherwise be
+    # silent until the first scrape / send. Warnings only -- and value-free: only a fixed reason
+    # is logged, never a token, a key or the JSON text.
+    from core.infrastructure.auth.metrics_token import (
+        METRICS_TOKEN_ENV,
+        configured_metrics_token_problem,
+    )
+    from core.infrastructure.mailing_agent.client import org_api_keys_config_problem
+
+    metrics_problem = configured_metrics_token_problem()
+    if metrics_problem:
+        logger.warning(
+            f"{METRICS_TOKEN_ENV} is set but unusable ({metrics_problem}); "
+            "GET /metrics will answer 403 until it is fixed."
+        )
+    key_map_problem = org_api_keys_config_problem()
+    if key_map_problem:
+        logger.warning(
+            f"MAILING_AGENT_ORG_API_KEYS is set but rejected ({key_map_problem}); "
+            "Mailer calls will fail closed (mailing_agent_auth_not_configured) until it is fixed."
+        )
+
     for var_name, feature in _RECOMMENDED_VARS:
         if not os.getenv(var_name):
             logger.warning(

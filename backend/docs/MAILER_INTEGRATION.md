@@ -41,7 +41,7 @@ key. No distributed transaction spans them (see §6).
 | Header | `X-API-Key: <tenant key>` on every call |
 | Tenant authority | The **Mailer**. It maps the presented key to its organization through `ORG_KEY_MAP` (`{"<key>": "<org_id>"}`). LeadBoost never sends an organization id; nothing in a body authorizes anything |
 | LeadBoost side | `MAILING_AGENT_BASE_URL`, `MAILING_AGENT_ORG_API_KEYS` (`{"<leadboost_org_id>": "<mailer_key>"}`), `MAILING_AGENT_TIMEOUT_SECONDS` (default 15, must be finite and positive) |
-| Unique key per organization | Each LeadBoost organization must map to a distinct Mailer API key. Duplicate values are not rejected by the current client and must be prevented by operator configuration. Missing key ⇒ fail closed (`mailing_agent_auth_not_configured`). |
+| Unique key per organization | Each LeadBoost organization must map to a distinct Mailer API key. The client **rejects** a map in which two different entries carry the same non-empty key (compared after trimming whitespace) or in which an organization entry is repeated: the whole map is unusable, every call fails closed (`mailing_agent_auth_not_configured`) before any request is made, and only a fixed, value-free reason is logged (never a key, an organization id or the JSON). Missing key ⇒ fail closed (`mailing_agent_auth_not_configured`). |
 | HTTPS | `MAILING_AGENT_BASE_URL` must be `https://`, or `http://` to a loopback host only (`localhost`, `127.0.0.1`, `::1`). Anything else ⇒ `mailing_agent_insecure_transport`; credential-bearing calls are refused |
 | Redirects | Never followed, so a 3xx cannot forward a key or credential to another host |
 | Operator credential | The Mailer has a **separate** `SYSTEM_OPERATOR_API_KEY` (header `X-System-Operator-Key`) for deployment-wide operator routes. LeadBoost never holds or sends it, and a tenant key does not grant operator access |
@@ -50,7 +50,7 @@ key. No distributed transaction spans them (see §6).
 Keys are provisioned by an operator; automated tenant-key provisioning is not implemented. Use placeholders
 in any shared document; never paste a real key, a mailbox password or a credential-bearing connection string.
 
-**Tenant-key uniqueness is an operator invariant in the current implementation.** The LeadBoost client does not validate duplicate values in `MAILING_AGENT_ORG_API_KEYS`. If two LeadBoost organization IDs map to the same key, Mailer resolves both requests to the same Mailer tenant, which can expose mailbox or conversation data across those LeadBoost organizations. Keep each organization's key unique until runtime validation is implemented.
+**Tenant-key uniqueness is enforced on the LeadBoost side.** If two LeadBoost organization IDs mapped to the same key, Mailer would resolve both requests to the same Mailer tenant, exposing mailbox or conversation data across those LeadBoost organizations; the client therefore refuses such a map (see above) and startup logs a warning with the reason code (`duplicate_key_value` / `duplicate_organization_entry`). This does **not** validate the Mailer's own `ORG_KEY_MAP` — that is a separate check on the Mailer side — and the two maps must still be exact inverses. Fixing a rejected map is an operator action; no secret is rotated automatically.
 
 ## 3. Mailbox lifecycle
 

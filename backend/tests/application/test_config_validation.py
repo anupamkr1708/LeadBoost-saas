@@ -79,3 +79,36 @@ def test_all_problems_reported_together_not_one_at_a_time(monkeypatch):
     assert "SECRET_KEY" in message
     assert "DATABASE_URL" in message
     assert "ALLOWED_ORIGINS" in message
+
+
+def test_rejected_mailer_key_map_is_a_value_free_startup_warning_not_a_crash(monkeypatch, caplog):
+    """A duplicate/malformed MAILING_AGENT_ORG_API_KEYS already fails closed per call; startup
+    surfaces it once, naming only a fixed reason -- never a key, an org id or the JSON."""
+    import json
+    import logging
+
+    shared = "dup-key-must-never-appear-in-logs"
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("MAILING_AGENT_ORG_API_KEYS", json.dumps({"7": shared, "8": shared}))
+
+    with caplog.at_level(logging.WARNING):
+        validate_startup_environment()  # must not raise
+
+    assert "MAILING_AGENT_ORG_API_KEYS is set but rejected (duplicate_key_value)" in caplog.text
+    assert shared not in caplog.text
+
+
+def test_valid_or_unset_mailer_key_map_adds_no_startup_warning(monkeypatch, caplog):
+    import json
+    import logging
+
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    for value in (None, json.dumps({"7": "k7", "8": "k8"})):
+        if value is None:
+            monkeypatch.delenv("MAILING_AGENT_ORG_API_KEYS", raising=False)
+        else:
+            monkeypatch.setenv("MAILING_AGENT_ORG_API_KEYS", value)
+        caplog.clear()
+        with caplog.at_level(logging.WARNING):
+            validate_startup_environment()
+        assert "MAILING_AGENT_ORG_API_KEYS is set but rejected" not in caplog.text
