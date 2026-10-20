@@ -129,12 +129,18 @@ services:
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
+    # Bearer token for the backend's operator-only /metrics (see `secrets:` below).
+    secrets:
+      - metrics_bearer_token
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.path=/prometheus"
       - "--storage.tsdb.retention.time=15d"
+    # Loopback only: the Prometheus UI/API has no authentication and holds the same global
+    # telemetry /metrics protects. Grafana reaches it over the internal network; reach the
+    # UI itself through an SSH tunnel (ssh -L 9090:localhost:9090 <host>).
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
     depends_on:
       - backend
     restart: unless-stopped
@@ -146,7 +152,9 @@ services:
     image: grafana/grafana:latest
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      # Required, no default: Grafana is the operator's window onto global telemetry, so it
+      # must never start with a well-known password.
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?Set GRAFANA_ADMIN_PASSWORD in .env (Grafana must not run with a default password)}
       GF_USERS_ALLOW_SIGN_UP: "false"
     ports:
       - "3001:3000"
@@ -175,6 +183,16 @@ networks:
     # reachable during initial setup.
   leadboost-public:
     driver: bridge
+
+# The Prometheus scrape credential. The file is created by the operator and is git-ignored:
+#   install -d -m 700 monitoring/secrets
+#   printf '%s' "<the same value as METRICS_BEARER_TOKEN in .env>" > monitoring/secrets/metrics_bearer_token
+#   chmod 644 monitoring/secrets/metrics_bearer_token   # readable by the container user; the
+#                                                       # 700 directory keeps other host users out
+# It must equal METRICS_BEARER_TOKEN given to the backend (via .env). Never commit it.
+secrets:
+  metrics_bearer_token:
+    file: ./monitoring/secrets/metrics_bearer_token
 
 volumes:
   postgres_data:

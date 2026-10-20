@@ -17,7 +17,7 @@ framework") rather than living in a separate file.
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from application.dto.models import (
@@ -32,6 +32,39 @@ from core.infrastructure.database import get_db
 
 router = APIRouter(prefix="/analytics")
 
+# Largest accepted `hours` window: one year. The frontend's widest explicit window is 30 days
+# (720h; "All time" is expressed by omitting the parameter), so this leaves ample headroom
+# while keeping `timedelta(hours=...)` far from OverflowError. Documented in
+# docs/OBSERVABILITY_AND_METRICS.md.
+MAX_ANALYTICS_HOURS = 24 * 365
+
+
+def _hours_query(description: str) -> Optional[int]:
+    """Optional positive integer window, 1..MAX_ANALYTICS_HOURS; omitted == all-time.
+    Out-of-range or non-integer values are ordinary 422 validation errors."""
+    return Query(
+        default=None,
+        ge=1,
+        le=MAX_ANALYTICS_HOURS,
+        description=f"{description} Integer 1-{MAX_ANALYTICS_HOURS}. Omit for all-time.",
+    )
+
+
+def require_organization_id(current_user: User = Depends(get_current_user)) -> int:
+    """The authenticated user's organization id; 403 if the user has none.
+
+    `AnalyticsService` treats `organization_id=None` as "no filter" (global aggregates --
+    that is what the operator-only /metrics route relies on). A customer request must
+    never reach that path, so a legacy or detached user row with a NULL organization is
+    refused instead of being served global data.
+    """
+    if current_user.organization_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Organization context required",
+        )
+    return current_user.organization_id
+
 
 def _since_from_hours(hours: Optional[int]) -> Optional[datetime]:
     if hours is None:
@@ -41,11 +74,8 @@ def _since_from_hours(hours: Optional[int]) -> Optional[datetime]:
 
 @router.get("/pipeline-metrics", response_model=PipelineMetricsSummary)
 async def get_pipeline_metrics(
-    hours: Optional[int] = Query(
-        default=None,
-        description="Only include pipeline runs from the last N hours. Omit for all-time.",
-    ),
-    current_user: User = Depends(get_current_user),
+    hours: Optional[int] = _hours_query("Only include pipeline runs from the last N hours."),
+    organization_id: int = Depends(require_organization_id),
     db: Session = Depends(get_db),
 ) -> Any:
     """
@@ -54,18 +84,15 @@ async def get_pipeline_metrics(
     """
     service = AnalyticsService(db)
     return service.get_pipeline_metrics(
-        organization_id=current_user.organization_id,
+        organization_id=organization_id,
         since=_since_from_hours(hours),
     )
 
 
 @router.get("/evaluation-metrics", response_model=EvaluationMetricsSummary)
 async def get_evaluation_metrics(
-    hours: Optional[int] = Query(
-        default=None,
-        description="Only include evaluations from the last N hours. Omit for all-time.",
-    ),
-    current_user: User = Depends(get_current_user),
+    hours: Optional[int] = _hours_query("Only include evaluations from the last N hours."),
+    organization_id: int = Depends(require_organization_id),
     db: Session = Depends(get_db),
 ) -> Any:
     """
@@ -74,18 +101,15 @@ async def get_evaluation_metrics(
     """
     service = AnalyticsService(db)
     return service.get_evaluation_metrics(
-        organization_id=current_user.organization_id,
+        organization_id=organization_id,
         since=_since_from_hours(hours),
     )
 
 
 @router.get("/discovery-metrics", response_model=DiscoveryMetricsSummary)
 async def get_discovery_metrics(
-    hours: Optional[int] = Query(
-        default=None,
-        description="Only include discovery runs from the last N hours. Omit for all-time.",
-    ),
-    current_user: User = Depends(get_current_user),
+    hours: Optional[int] = _hours_query("Only include discovery runs from the last N hours."),
+    organization_id: int = Depends(require_organization_id),
     db: Session = Depends(get_db),
 ) -> Any:
     """
@@ -96,6 +120,6 @@ async def get_discovery_metrics(
     """
     service = AnalyticsService(db)
     return service.get_discovery_metrics(
-        organization_id=current_user.organization_id,
+        organization_id=organization_id,
         since=_since_from_hours(hours),
     )

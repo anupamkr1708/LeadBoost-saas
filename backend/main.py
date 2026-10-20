@@ -19,6 +19,7 @@ import time
 from core.infrastructure.database import init_db, get_db
 from api.endpoints import leads, auth, organizations, billing, analytics, discovery, email_accounts, outreach
 from core.infrastructure.logging import setup_logging
+from core.infrastructure.auth.metrics_token import require_metrics_token
 from core.observability import prometheus_metrics
 
 # Load environment variables
@@ -146,16 +147,19 @@ async def add_request_id_and_timing(request: Request, call_next):
     response.headers["X-Request-ID"] = request_id
     response.headers["X-Response-Time"] = f"{duration_ms}ms"
 
-    # Prometheus metrics (labeled by route *template*, e.g.
-    # "/leads/{lead_id}", never the raw path -- see
-    # core.observability.prometheus_metrics.route_template for why).
+    # Prometheus metrics. Every label value is drawn from a bounded set: the
+    # matched route *template* (e.g. "/leads/{lead_id}", or "__unmatched__" when
+    # no route matched), a fixed list of HTTP methods ("OTHER" for anything
+    # else), and the response status code -- never the raw path or any
+    # client-supplied text. See core.observability.prometheus_metrics.
     try:
         path_label = prometheus_metrics.route_template(request)
+        method_label = prometheus_metrics.method_label(request)
         prometheus_metrics.http_requests_total.labels(
-            method=request.method, path=path_label, status_code=str(response.status_code)
+            method=method_label, path=path_label, status_code=str(response.status_code)
         ).inc()
         prometheus_metrics.http_request_duration_seconds.labels(
-            method=request.method, path=path_label
+            method=method_label, path=path_label
         ).observe(duration_seconds)
     except Exception:
         # Metrics must never be able to break a real request.
@@ -302,15 +306,19 @@ async def liveness_check():
     return {"status": "alive"}
 
 
-@app.get("/metrics")
+@app.get("/metrics", dependencies=[Depends(require_metrics_token)])
 async def metrics(db: Session = Depends(get_db)):
     """
     Prometheus scrape endpoint (SECTION 7 of the production-polish brief).
-    No auth by design -- this is standard practice for Prometheus targets
-    and matches how /health, /ready, /live are already exposed; put this
-    behind network-level access control (a private network / VPC, or an
-    IP allowlist at the reverse proxy) in production rather than
-    application-level auth, so Prometheus itself doesn't need credentials.
+
+    OWNER/OPERATOR ONLY. The payload is process-global telemetry across every
+    organization, so the route requires the dedicated bearer credential
+    METRICS_BEARER_TOKEN (see core.infrastructure.auth.metrics_token): 403 when
+    it is not configured (the route is disabled), 401 when the presented
+    credential is missing or wrong. The route-level dependency runs before
+    `get_db`, so a rejected request never opens a database session. The
+    optional nginx allowlist remains defense in depth for the self-hosted
+    stack only; it is not the security boundary for a hosted deployment.
     Contains only counts, durations, and status codes -- no customer
     content of any kind.
     """

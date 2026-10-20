@@ -64,9 +64,10 @@ def _register_and_login(client, label):
 # ---------------------------------------------------------------------------
 
 # The complete, intentional anonymous surface. Docs/OpenAPI are deliberately exposed (README);
-# /metrics is unauthenticated by design and meant to be restricted at the network layer
-# (docs/MONITORING.md); register/login/refresh are the public auth entry points; the three
-# probes are public health checks. Adding to this set is a conscious, reviewable decision.
+# register/login/refresh are the public auth entry points; the three probes are public health
+# checks. /metrics is deliberately NOT here: it carries process-global telemetry and requires the
+# dedicated METRICS_BEARER_TOKEN (403 when unset, 401 when wrong/missing) -- see
+# test_metrics_auth.py. Adding to this set is a conscious, reviewable decision.
 INTENTIONALLY_PUBLIC = {
     ("GET", "/openapi.json"),
     ("GET", "/docs"),
@@ -78,7 +79,6 @@ INTENTIONALLY_PUBLIC = {
     ("GET", "/health"),
     ("GET", "/ready"),
     ("GET", "/live"),
-    ("GET", "/metrics"),
 }
 
 
@@ -100,6 +100,14 @@ def test_only_intentionally_public_routes_answer_anonymous_callers(client):
             answered_anonymously.add((method, path))
 
     assert answered_anonymously == INTENTIONALLY_PUBLIC
+
+
+def test_metrics_is_not_anonymous_whether_or_not_a_token_is_configured(client, monkeypatch):
+    monkeypatch.delenv("METRICS_BEARER_TOKEN", raising=False)
+    assert client.get("/metrics").status_code == 403  # disabled: never an anonymous body
+
+    monkeypatch.setenv("METRICS_BEARER_TOKEN", "t" * 40)
+    assert client.get("/metrics").status_code == 401  # enabled: credentials required
 
 
 def test_garbage_bearer_token_is_rejected_on_a_protected_route(client):

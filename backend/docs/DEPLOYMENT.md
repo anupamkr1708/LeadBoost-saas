@@ -117,7 +117,7 @@ never calls the Mailer and must never receive a Mailer URL or key
 | Variable | Required | Meaning |
 |---|---|---|
 | `MAILING_AGENT_BASE_URL` | yes | Base URL of the deployed Mailer API. Must be `https://`; plain `http://` is accepted only for loopback hosts (any other value fails closed with `INSECURE_TRANSPORT`, before any request) |
-| `MAILING_AGENT_ORG_API_KEYS` | yes | JSON object `{"<leadboost_org_id>": "<mailer_api_key>"}`. One key per LeadBoost organization; a missing org fails closed (`AUTH_NOT_CONFIGURED`). Invalid JSON / non-object is logged and yields no usable keys |
+| `MAILING_AGENT_ORG_API_KEYS` | yes | JSON object `{"<leadboost_org_id>": "<mailer_api_key>"}`. One key per LeadBoost organization, each distinct (a shared key or a repeated organization entry makes the whole map unusable); a missing org fails closed (`AUTH_NOT_CONFIGURED`). Invalid JSON / non-object / duplicates are logged without values and yield no usable keys |
 | `MAILING_AGENT_TIMEOUT_SECONDS` | no | Positive number; default `15` |
 
 * `MAILER_AGENT_BASE_URL` and `MAILING_AGENT_API_KEY` are **not** read.

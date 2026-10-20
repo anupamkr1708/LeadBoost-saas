@@ -134,23 +134,87 @@ def _timeout_seconds() -> float:
     return value
 
 
+# Reason codes for an unusable MAILING_AGENT_ORG_API_KEYS. Short, fixed and value-free: they
+# are the only thing ever logged about a rejected configuration.
+KEY_MAP_INVALID_JSON = "invalid_json"
+KEY_MAP_NOT_AN_OBJECT = "not_an_object"
+KEY_MAP_DUPLICATE_ORG_ENTRY = "duplicate_organization_entry"
+KEY_MAP_DUPLICATE_KEY_VALUE = "duplicate_key_value"
+
+_KEY_MAP_PROBLEM_MESSAGES = {
+    KEY_MAP_INVALID_JSON: "is not valid JSON",
+    KEY_MAP_NOT_AN_OBJECT: "must be a JSON object",
+    KEY_MAP_DUPLICATE_ORG_ENTRY: "contains the same organization entry more than once",
+    KEY_MAP_DUPLICATE_KEY_VALUE: "maps the same Mailer API key to more than one organization",
+}
+
+
+class _DuplicateJsonKey(ValueError):
+    """A JSON object repeated a literal key (json.loads would silently keep the last one)."""
+
+
+def _reject_duplicate_json_keys(pairs):
+    seen = set()
+    for key, _value in pairs:
+        if key in seen:
+            raise _DuplicateJsonKey()
+        seen.add(key)
+    return dict(pairs)
+
+
+def _parse_org_key_map(raw: str) -> tuple:
+    """Parse and validate MAILING_AGENT_ORG_API_KEYS -> (mapping | None, problem | None).
+
+    Exactly one of the two is None. `problem` is one of the KEY_MAP_* codes -- never the
+    JSON text, an organization id or a key. Rules (all fail closed):
+      * blank/unset is not an error here (caller treats it as "no keys")
+      * malformed JSON, a non-object, or a repeated literal organization entry is rejected
+      * two DIFFERENT organization entries must not carry the same non-empty key: Mailer
+        resolves a key to exactly one tenant, so a shared key would let one LeadBoost
+        organization act as another's Mailer tenant. Keys are compared after .strip()
+        because an HTTP header value is whitespace-trimmed in transit.
+    Per-entry blank/non-string values stay individually unusable (None for that org only).
+    """
+    try:
+        mapping = json.loads(raw, object_pairs_hook=_reject_duplicate_json_keys)
+    except _DuplicateJsonKey:
+        return None, KEY_MAP_DUPLICATE_ORG_ENTRY
+    except ValueError:
+        return None, KEY_MAP_INVALID_JSON
+    if not isinstance(mapping, dict):
+        return None, KEY_MAP_NOT_AN_OBJECT
+    owners = {}
+    for org, key in mapping.items():
+        if isinstance(key, str) and key.strip():
+            if owners.setdefault(key.strip(), org) != org:
+                return None, KEY_MAP_DUPLICATE_KEY_VALUE
+    return mapping, None
+
+
+def org_api_keys_config_problem() -> Optional[str]:
+    """The KEY_MAP_* reason code if MAILING_AGENT_ORG_API_KEYS is set but unusable, else None.
+    Value-free; used for a startup warning so a bad mapping is visible before the first send."""
+    raw = os.getenv("MAILING_AGENT_ORG_API_KEYS", "")
+    if not raw.strip():
+        return None
+    return _parse_org_key_map(raw)[1]
+
+
 def org_api_key(organization_id: int) -> Optional[str]:
     """The Mailer API key mapped to this LeadBoost organization, or None.
 
     MAILING_AGENT_ORG_API_KEYS is a JSON object {"<leadboost_org_id>": "<key>"}.
-    Malformed JSON, a non-object, a missing org, or an empty/non-string key all
-    resolve to None (fail closed). The value is never logged.
+    Malformed JSON, a non-object, a repeated organization entry, the same key mapped to
+    more than one organization, a missing org, or an empty/non-string key all resolve to
+    None (fail closed -- for a rejected configuration, None for EVERY organization). Neither
+    the key values nor the JSON contents are ever logged.
     """
     raw = os.getenv("MAILING_AGENT_ORG_API_KEYS", "")
     if not raw.strip():
         return None
-    try:
-        mapping = json.loads(raw)
-    except ValueError:
-        logger.error("MAILING_AGENT_ORG_API_KEYS is not valid JSON; no Mailer keys are usable")
-        return None
-    if not isinstance(mapping, dict):
-        logger.error("MAILING_AGENT_ORG_API_KEYS must be a JSON object; no Mailer keys are usable")
+    mapping, problem = _parse_org_key_map(raw)
+    if problem is not None:
+        logger.error(f"MAILING_AGENT_ORG_API_KEYS {_KEY_MAP_PROBLEM_MESSAGES[problem]}; no Mailer keys are usable")
         return None
     key = mapping.get(str(organization_id))
     return key if isinstance(key, str) and key.strip() else None

@@ -14,6 +14,14 @@ global:
 scrape_configs:
   - job_name: "leadboost-backend"
     metrics_path: /metrics
+    # /metrics is owner/operator-only: the backend answers 403 unless METRICS_BEARER_TOKEN
+    # is configured, and 401 unless this exact token is presented. The token is read from a
+    # file (never written into this config); docker-compose.prod.yml mounts it from
+    # ./monitoring/secrets/metrics_bearer_token as the `metrics_bearer_token` secret. See
+    # docs/MONITORING.md for how the operator creates that file.
+    authorization:
+      type: Bearer
+      credentials_file: /run/secrets/metrics_bearer_token
     static_configs:
       - targets: ["backend:8000"]
         labels:
