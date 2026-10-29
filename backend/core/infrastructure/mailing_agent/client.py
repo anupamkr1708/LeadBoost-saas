@@ -294,6 +294,7 @@ def build_generated_outreach_payload(
     recipient_company: Optional[str],
     value_proposition: str,
     recipient_facts: list[str],
+    reply_to_message_reference: Optional[str] = None,
 ) -> dict:
     """The EXACT Mailer M2 request body (strict, extra fields are 422 there).
     No sender, SMTP, credential, subject/body, organization or mailbox field."""
@@ -316,6 +317,8 @@ def build_generated_outreach_payload(
         "value_proposition": value_proposition.strip()[:MAX_VALUE_PROPOSITION_CHARS],
         "recipient_facts": facts,
     }
+    if reply_to_message_reference:
+        payload["in_reply_to"] = {"message_reference": reply_to_message_reference}
     return payload
 
 
@@ -331,6 +334,7 @@ async def submit_generated_outreach(
     recipient_company: Optional[str],
     value_proposition: str,
     recipient_facts: list[str],
+    reply_to_message_reference: Optional[str] = None,
 ) -> DispatchResult:
     """Hand ONE authorized OutreachAction to Mailer's generated-outreach route.
 
@@ -359,6 +363,7 @@ async def submit_generated_outreach(
         recipient_company=recipient_company,
         value_proposition=value_proposition,
         recipient_facts=recipient_facts,
+        reply_to_message_reference=reply_to_message_reference,
     )
     resp = await send_request("POST", GENERATED_OUTREACH_PATH, organization_id=organization_id, json_body=payload)
 

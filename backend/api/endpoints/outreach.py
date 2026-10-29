@@ -60,6 +60,8 @@ _ERROR_STATUS = {
     OutreachErrorCode.AUTOMATIC_SENDING_DISABLED: status.HTTP_422_UNPROCESSABLE_ENTITY,
     OutreachErrorCode.INVALID_STATE_TRANSITION: status.HTTP_409_CONFLICT,
     OutreachErrorCode.IDEMPOTENCY_KEY_REUSED: status.HTTP_409_CONFLICT,
+    OutreachErrorCode.REPLY_REQUIRES_REVIEW: status.HTTP_422_UNPROCESSABLE_ENTITY,
+    OutreachErrorCode.REPLY_IDEMPOTENCY_KEY_NOT_ALLOWED: status.HTTP_422_UNPROCESSABLE_ENTITY,
     # L1: configuration conflict -- more than one eligible sender; never guessed.
     OutreachErrorCode.MULTIPLE_ACTIVE_SENDERS: status.HTTP_409_CONFLICT,
 }
@@ -97,6 +99,7 @@ async def create_outreach_action_endpoint(
             email_account_id=payload.email_account_id,
             mode=payload.mode.value,
             idempotency_key=payload.idempotency_key,
+            reply_to_message_reference=payload.reply_to_message_reference,
         )
         return action
     except OutreachError as exc:

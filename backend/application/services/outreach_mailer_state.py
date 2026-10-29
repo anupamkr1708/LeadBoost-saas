@@ -68,6 +68,7 @@ def _to_view(conversation: MailerConversation) -> MailerStateView:
                 body_truncated=m.body_truncated,
                 created_at=m.created_at,
                 delivery_state=m.delivery_state,
+                message_reference=m.message_reference,
             )
             for m in conversation.messages
         ],

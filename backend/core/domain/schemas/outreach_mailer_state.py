@@ -49,6 +49,9 @@ class MailerConversationMessageView(_Strict):
     created_at: Optional[datetime] = None
     # Outbound only: that message's own dispatch's delivery state. None for inbound.
     delivery_state: Optional[Literal["queued", "sending", "sent", "failed", "unknown"]] = None
+    # Inbound only: pass as `reply_to_message_reference` to create a reply action. NOT opaque
+    # (the Mailer's internal message row id as a decimal string).
+    message_reference: Optional[str] = None
 
 
 class MailerStateView(_Strict):

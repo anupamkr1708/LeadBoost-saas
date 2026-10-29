@@ -336,6 +336,7 @@ def test_wire_models_match_the_mailers_declared_shape():
         "delivery_state",
         "mailing_agent_reference",
         "mailbox_reference",
+        "message_reference",  # inbound only: the reply-parent reference (C9.4)
     }
     for model in (cc.MailerConversation, cc.MailerConversationAction, cc.MailerConversationMessage):
         assert model.model_config.get("extra") == "forbid"

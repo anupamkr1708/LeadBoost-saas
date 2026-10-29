@@ -162,8 +162,15 @@ class FakeMailer:
             return httpx.Response(200, json=self._out(ref))
 
         if call.path == "/integrations/leadboost/outreach-requests" and call.method == "POST":
-            if not isinstance(b, dict) or set(b) - {"external_action_id", "idempotency_key", "correlation_id", "recipient", "context"}:
+            if not isinstance(b, dict) or set(b) - {"external_action_id", "idempotency_key", "correlation_id", "recipient", "context", "in_reply_to"}:
                 return httpx.Response(422, json={"detail": "invalid body"})
+            rt = b.get("in_reply_to")
+            if "in_reply_to" in b and not (
+                isinstance(rt, dict) and set(rt) == {"message_reference"}
+                and isinstance(rt["message_reference"], str) and rt["message_reference"].isdigit()
+                and not rt["message_reference"].startswith("0")
+            ):
+                return httpx.Response(422, json={"detail": "invalid in_reply_to"})
             key = (t, b["idempotency_key"])
             if key in self.dispatches:
                 return httpx.Response(202, json={"accepted": True, "mailing_agent_reference": self.dispatches[key]["reference"]})
@@ -200,7 +207,7 @@ class FakeMailer:
         msgs = rec["messages"]
         window = msgs[-limit:]
         out = []
-        for m in window:
+        for idx, m in enumerate(window):
             outbound = m["direction"] == "outbound"
             out.append(dict(
                 direction=m["direction"], message_type="initial_outreach" if outbound else None,
@@ -208,6 +215,8 @@ class FakeMailer:
                 delivery_state=rec["state"] if outbound else None,
                 mailing_agent_reference=rec["reference"] if outbound else None,
                 mailbox_reference=rec["mailbox"],
+                # like the real Mailer: always present; None on outbound, a decimal id string on inbound
+                message_reference=None if outbound else m.get("message_reference", str(idx + 1)),
             ))
         return {
             "action": {"accepted": True, "state": rec["state"], "mailing_agent_reference": rec["reference"],
@@ -224,9 +233,12 @@ class FakeMailer:
         self.dispatch_record(tenant, idempotency_key)["state"] = state
 
     def add_message(self, tenant: str, idempotency_key: str, *, direction: str, body: str,
-                    subject: Optional[str] = "Quick question", created_at: str = "2026-01-01T12:00:00Z"):
-        self.dispatch_record(tenant, idempotency_key)["messages"].append(
-            dict(direction=direction, body=body, subject=subject, created_at=created_at))
+                    subject: Optional[str] = "Quick question", created_at: str = "2026-01-01T12:00:00Z",
+                    message_reference: Optional[str] = None):
+        m = dict(direction=direction, body=body, subject=subject, created_at=created_at)
+        if message_reference is not None:
+            m["message_reference"] = message_reference
+        self.dispatch_record(tenant, idempotency_key)["messages"].append(m)
 
     # ---- wiring ----------------------------------------------------------
     def install(self, monkeypatch, mc) -> "FakeMailer":

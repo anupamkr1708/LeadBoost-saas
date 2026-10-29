@@ -31,6 +31,11 @@ class OutreachActionCreate(BaseModel):
     # layer derives one from (lead_id, email_account_id, message
     # content) -- see application/services/outreach_service.py.
     idempotency_key: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    # Makes this a REPLY to one specific inbound Mailer message: the `message_reference` the
+    # mailer-state view shows for inbound messages. NOT opaque: it is the decimal form of the
+    # Mailer's internal message row id (tenant-scoped on lookup). Replies must be mode=manual and
+    # take no idempotency_key (their identity is tenant + this reference).
+    reply_to_message_reference: Optional[str] = Field(default=None, pattern=r"^[1-9][0-9]{0,17}$")
 
 
 class OutreachAction(BaseModel):
@@ -53,6 +58,7 @@ class OutreachAction(BaseModel):
     body: str
     correlation_id: Optional[str] = None
     idempotency_key: str
+    reply_to_message_reference: Optional[str] = None
     reason: Optional[str] = None
     approved_by_user_id: Optional[int] = None
     approved_at: Optional[datetime] = None

@@ -105,6 +105,33 @@ LeadBoost GET /api/v2/outreach-actions/{action_id}/mailer-state      (customer-f
   `OutreachAction` in response: if LeadBoost says `DISPATCH_FAILED` and the Mailer says `sent`, **both are shown** and
   nothing is healed (that is a deliberate, separate, later reconciliation concern).
 
+## 3a. Replying to an inbound message (C9.4)
+
+A reply is an ordinary LeadBoost action (create -> approve -> dispatch) that additionally names the
+inbound Mailer message it answers. There is no automatic reply: inbound mail is still only stored and
+classified; a further email exists only because a person created, approved and dispatched an action.
+
+* **Reference.** The conversation view (section 3) now carries `message_reference` on **inbound** messages
+  only. It is **not opaque**: it is the decimal form of the Mailer's internal message row id. This is a
+  deliberate, limited exception to the view's no-internal-ids rule. It is safe to expose only because every
+  use is resolved tenant- and mailbox-scoped by the Mailer: a message that is unknown, outbound or another
+  organization's is an indistinguishable 404.
+* **LeadBoost.** `POST /api/v2/outreach-actions` accepts `reply_to_message_reference`. Enforced in the service
+  layer: `mode` must be `manual` (a reply is always created `pending_review`; `automatic` is refused with
+  `reply_requires_review`, whatever the organization's automatic policy says) and no `idempotency_key` may be
+  supplied (`reply_idempotency_key_not_allowed`). The idempotency identity is **tenant + inbound reference**
+  only, backed by the existing `UNIQUE(organization_id, idempotency_key)` constraint, so a retry, a re-poll
+  or a different sender/lead can never create a second independently dispatchable reply (a different
+  sender/lead for the same inbound message is a 409).
+* **Mailer request.** The existing generated-outreach request gains an optional
+  `in_reply_to: {"message_reference": "<digits>"}`. The Mailer derives subject (deterministic `Re:`),
+  `In-Reply-To` (the inbound message's Message-ID) and `References` from its own stored row; none of these are
+  accepted from the caller. The recipient must be the parent's sender; a contact with a native schedule is
+  refused; the existing grounding and suppression gates apply unchanged.
+* **Not a preview.** As for all generated outreach, the action's `body` is LeadBoost's snapshot and the Mailer
+  writes the actual text **after** approval. Approving a reply authorizes the action; it does **not** show the
+  reviewer the exact body that will be sent. The sent text is visible afterwards in the conversation view.
+
 ## Known limitations (deliberate, documented — not hidden)
 * **Snapshot ≠ delivered text.** `OutreachAction.subject/body` is LeadBoost's *legacy snapshot* (what was
   authorized/reviewed). The integrated path delivers the **Mailer's own generated `Message`**. The two are

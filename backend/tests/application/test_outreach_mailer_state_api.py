@@ -37,7 +37,7 @@ from tests.application.test_outreach_dispatch_l1 import _account, _approved, _di
 CONV = "/integrations/leadboost/outreach-actions/"
 TOP_KEYS = {"availability", "error_code", "mailer"}
 MAILER_KEYS = {"delivery_state", "updated_at", "messages", "has_more"}
-MESSAGE_KEYS = {"direction", "subject", "body", "body_truncated", "created_at", "delivery_state"}
+MESSAGE_KEYS = {"direction", "subject", "body", "body_truncated", "created_at", "delivery_state", "message_reference"}  # message_reference: inbound reply-parent (C9.4)
 
 
 @pytest.fixture()

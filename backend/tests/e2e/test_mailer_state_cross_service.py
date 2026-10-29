@@ -194,6 +194,7 @@ def test_customer_sees_the_real_mailers_state_and_conversation_end_to_end(client
         "body_truncated",
         "created_at",
         "delivery_state",
+        "message_reference",  # C9.4: null on outbound, the reply-parent reference on inbound
     }
     # read-only, both sides: the Mailer's database and LeadBoost's action are untouched
     assert mailer_server.dump() == before_mailer
