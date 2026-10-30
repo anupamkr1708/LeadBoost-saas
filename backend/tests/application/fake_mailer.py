@@ -29,7 +29,9 @@ changing while a Mailer call is in flight).
 """
 
 import asyncio
+import hashlib
 import json
+import re
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
@@ -54,6 +56,15 @@ class Call:
     headers: Dict[str, str]
     status: int = 0
     raw_target: str = ""  # path + query exactly as sent (percent-encoding intact)
+
+
+# The real Mailer's reply contract: an inbound message's reference is an opaque 32-lowercase-hex token.
+REPLY_TOKEN_RE = re.compile(r"^[0-9a-f]{32}$")
+
+
+def fake_reply_token(tenant: str, idempotency_key: str, ordinal: int) -> str:
+    """Deterministic, valid 32-hex token for the ``ordinal``-th message of a scripted conversation."""
+    return hashlib.md5(f"fake-mailer|{tenant}|{idempotency_key}|{ordinal}".encode(), usedforsecurity=False).hexdigest()
 
 
 @dataclass
@@ -167,8 +178,7 @@ class FakeMailer:
             rt = b.get("in_reply_to")
             if "in_reply_to" in b and not (
                 isinstance(rt, dict) and set(rt) == {"message_reference"}
-                and isinstance(rt["message_reference"], str) and rt["message_reference"].isdigit()
-                and not rt["message_reference"].startswith("0")
+                and isinstance(rt["message_reference"], str) and REPLY_TOKEN_RE.fullmatch(rt["message_reference"])
             ):
                 return httpx.Response(422, json={"detail": "invalid in_reply_to"})
             key = (t, b["idempotency_key"])
@@ -207,7 +217,7 @@ class FakeMailer:
         msgs = rec["messages"]
         window = msgs[-limit:]
         out = []
-        for idx, m in enumerate(window):
+        for m in window:
             outbound = m["direction"] == "outbound"
             out.append(dict(
                 direction=m["direction"], message_type="initial_outreach" if outbound else None,
@@ -215,8 +225,8 @@ class FakeMailer:
                 delivery_state=rec["state"] if outbound else None,
                 mailing_agent_reference=rec["reference"] if outbound else None,
                 mailbox_reference=rec["mailbox"],
-                # like the real Mailer: always present; None on outbound, a decimal id string on inbound
-                message_reference=None if outbound else m.get("message_reference", str(idx + 1)),
+                # like the real Mailer: always present; None on outbound, the stable opaque 32-hex token on inbound
+                message_reference=None if outbound else m["message_reference"],
             ))
         return {
             "action": {"accepted": True, "state": rec["state"], "mailing_agent_reference": rec["reference"],
@@ -235,10 +245,17 @@ class FakeMailer:
     def add_message(self, tenant: str, idempotency_key: str, *, direction: str, body: str,
                     subject: Optional[str] = "Quick question", created_at: str = "2026-01-01T12:00:00Z",
                     message_reference: Optional[str] = None):
+        rec = self.dispatch_record(tenant, idempotency_key)
         m = dict(direction=direction, body=body, subject=subject, created_at=created_at)
-        if message_reference is not None:
-            m["message_reference"] = message_reference
-        self.dispatch_record(tenant, idempotency_key)["messages"].append(m)
+        if direction == "inbound":
+            # Assigned once, here, so the token is stable however the conversation window slides.
+            token = message_reference or fake_reply_token(tenant, idempotency_key, len(rec["messages"]))
+            if not REPLY_TOKEN_RE.fullmatch(token):
+                raise ValueError(f"message_reference must be 32 lowercase hex characters, got {token!r}")
+            m["message_reference"] = token
+        elif message_reference is not None:
+            raise ValueError("outbound messages carry no message_reference")
+        rec["messages"].append(m)
 
     # ---- wiring ----------------------------------------------------------
     def install(self, monkeypatch, mc) -> "FakeMailer":

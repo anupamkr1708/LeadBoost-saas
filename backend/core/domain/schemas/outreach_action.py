@@ -32,10 +32,10 @@ class OutreachActionCreate(BaseModel):
     # content) -- see application/services/outreach_service.py.
     idempotency_key: Optional[str] = Field(default=None, min_length=1, max_length=200)
     # Makes this a REPLY to one specific inbound Mailer message: the `message_reference` the
-    # mailer-state view shows for inbound messages. NOT opaque: it is the decimal form of the
-    # Mailer's internal message row id (tenant-scoped on lookup). Replies must be mode=manual and
-    # take no idempotency_key (their identity is tenant + this reference).
-    reply_to_message_reference: Optional[str] = Field(default=None, pattern=r"^[1-9][0-9]{0,17}$")
+    # mailer-state view shows for inbound messages. An opaque Mailer token (32 lowercase hex
+    # characters), not a database id; the Mailer resolves it tenant- and mailbox-scoped on every use.
+    # Replies must be mode=manual and take no idempotency_key (their identity is tenant + this reference).
+    reply_to_message_reference: Optional[str] = Field(default=None, pattern=r"^[0-9a-f]{32}$")
 
 
 class OutreachAction(BaseModel):

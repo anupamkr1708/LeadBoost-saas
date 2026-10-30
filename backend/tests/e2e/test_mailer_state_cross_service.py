@@ -20,6 +20,7 @@ response must have exactly the real Mailer's shape.
 import asyncio
 import json
 import os
+import re
 import uuid
 from urllib.parse import quote
 
@@ -32,7 +33,7 @@ from core.domain.models.outreach_action import OutreachAction, OutreachState
 from core.infrastructure.database import SessionLocal
 from core.infrastructure.mailing_agent.conversation_client import fetch_conversation
 from sqlalchemy import update
-from tests.application.fake_mailer import FakeMailer
+from tests.application.fake_mailer import FakeMailer, fake_reply_token
 from tests.application.test_outreach_dispatch_l1 import (
     _account,
     _approved,
@@ -413,7 +414,13 @@ def test_the_fake_mailer_has_exactly_the_real_mailers_conversation_shape(client,
     )
     rec["messages"] = [
         dict(direction="outbound", body="b", subject="s", created_at="2026-01-01T12:00:00Z"),
-        dict(direction="inbound", body="r", subject="Re: s", created_at="2026-01-01T13:00:00Z"),
+        dict(
+            direction="inbound",
+            body="r",
+            subject="Re: s",
+            created_at="2026-01-01T13:00:00Z",
+            message_reference=fake_reply_token("tenant-a", key, 1),
+        ),
     ]
     faked = fake._conversation_out(rec, 20)
 
@@ -428,3 +435,9 @@ def test_the_fake_mailer_has_exactly_the_real_mailers_conversation_shape(client,
     assert {k: type(v).__name__ for k, v in real["action"].items() if v is not None} == {
         k: type(v).__name__ for k, v in faked["action"].items() if v is not None
     }
+    # The reply handle: opaque 32-lowercase-hex on inbound, null on outbound -- identically in the real
+    # Mailer and the fake (this is the field whose format drifted before: decimal id vs opaque token).
+    for side in (real, faked):
+        out_msg, in_msg = side["messages"]
+        assert out_msg["message_reference"] is None
+        assert re.fullmatch(r"[0-9a-f]{32}", in_msg["message_reference"])

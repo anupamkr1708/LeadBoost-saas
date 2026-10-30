@@ -184,7 +184,7 @@ class OutreachAction(Base):
     idempotency_key = Column(String, nullable=False, index=True)
 
     # Set only for a reply: the Mailer `message_reference` of the INBOUND message this action
-    # answers. NOT opaque -- the decimal form of the Mailer's internal message row id. Immutable
+    # answers: the Mailer's opaque reply token (32 lowercase hex characters; no database id). Immutable
     # like the rest of the snapshot; NULL for ordinary outreach.
     reply_to_message_reference = Column(String, nullable=True)
 

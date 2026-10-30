@@ -33,6 +33,7 @@ import json
 import logging
 import os
 import subprocess
+import re
 import uuid
 from email import message_from_bytes
 from pathlib import Path
@@ -387,9 +388,10 @@ def test_continuous_leadboost_mailer_smtp_imap_leadboost_lifecycle(
         "direction", "subject", "body", "body_truncated", "created_at", "delivery_state", "message_reference",
     }
     assert out_view["message_reference"] is None            # outbound messages carry no reply reference
-    inbound_ref = in_view["message_reference"]              # C9.4: NOT opaque (the Mailer's message row id)
-    assert inbound_ref and inbound_ref.isdigit()
-    assert drv.sql("SELECT id FROM messages WHERE direction = 'inbound'") == [{"id": int(inbound_ref)}]
+    inbound_ref = in_view["message_reference"]              # C9.4: the Mailer's OPAQUE reply token, never a row id
+    assert re.fullmatch(r"[0-9a-f]{32}", inbound_ref)
+    inbound_row = drv.sql("SELECT id, reply_reference FROM messages WHERE direction = 'inbound'")
+    assert [r["reply_reference"] for r in inbound_row] == [inbound_ref] and inbound_ref != str(inbound_row[0]["id"])
 
     # ---- 10. nothing internal or secret reaches the browser.
     for forbidden in (
@@ -480,11 +482,29 @@ def test_continuous_leadboost_mailer_smtp_imap_leadboost_lifecycle(
     reply_where = f"idempotency_key = {_quote(_action_row(reply_id)['idempotency_key'])}"
     (rd,) = drv.sql(
         f"SELECT state, message_id, organization_id, mailbox_id, "
-        f"grounding_context->'reply_parent'->>'message_id' AS parent FROM external_dispatches WHERE {reply_where}"
+        f"grounding_context->'reply_parent'->>'message_id' AS parent_message_id "
+        f"FROM external_dispatches WHERE {reply_where}"
     )
-    assert (rd["state"], rd["message_id"], rd["organization_id"], rd["parent"]) == (
-        "queued", None, "tenant-a", inbound_ref,
+
+    # The opaque public token and the Mailer's internal parent row ID
+    # are intentionally different identifiers.
+    expected_parent_id = str(inbound_row[0]["id"])
+
+    assert (
+        rd["state"],
+        rd["message_id"],
+        rd["organization_id"],
+        rd["parent_message_id"],
+    ) == (
+        "queued",
+        None,
+        "tenant-a",
+        expected_parent_id,
     )
+
+    # The public reference must remain unchanged and opaque.
+    assert inbound_row[0]["reply_reference"] == inbound_ref
+    assert inbound_ref != expected_parent_id
     assert rd["mailbox_id"] == box["id"]
     assert drv.sql("SELECT count(*) AS n FROM external_dispatches") == [{"n": 2}]
     assert len(_wire_messages(infra)) == 1                    # accepted != sent

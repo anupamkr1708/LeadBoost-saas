@@ -25,6 +25,7 @@ import subprocess
 import tempfile
 import time
 import urllib.error
+import uuid
 import urllib.request
 from typing import Any, Dict, List, Optional
 
@@ -233,9 +234,11 @@ class MailerProcess:
     ) -> int:
         d = self.dispatch(idempotency_key)
         mid = self.execute(
-            "INSERT INTO messages (contact_id, direction, message_type, subject, body, status, created_at) "
-            "VALUES (?, 'outbound', 'initial_outreach', ?, ?, ?, ?)",
-            (d["contact_id"], subject, body, state, at),
+            # Raw SQL bypasses the Mailer's ORM column default, so the opaque reply token is set explicitly
+            # (as the Mailer's own insert paths do); a row without one has no public reply handle.
+            "INSERT INTO messages (contact_id, direction, message_type, subject, body, status, created_at, "
+            "reply_reference) VALUES (?, 'outbound', 'initial_outreach', ?, ?, ?, ?, ?)",
+            (d["contact_id"], subject, body, state, at, uuid.uuid4().hex),
         )
         self.execute(
             "UPDATE external_dispatches SET message_id = ?, state = ? WHERE id = ?", (mid, state, d["id"])
@@ -253,7 +256,7 @@ class MailerProcess:
     ) -> int:
         d = self.dispatch(idempotency_key)
         return self.execute(
-            "INSERT INTO messages (contact_id, direction, subject, body, status, mailbox_id, created_at) "
-            "VALUES (?, 'inbound', ?, ?, 'received', ?, ?)",
-            (d["contact_id"], subject, body, mailbox_id, at),
+            "INSERT INTO messages (contact_id, direction, subject, body, status, mailbox_id, created_at, "
+            "reply_reference) VALUES (?, 'inbound', ?, ?, 'received', ?, ?, ?)",
+            (d["contact_id"], subject, body, mailbox_id, at, uuid.uuid4().hex),
         )

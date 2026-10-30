@@ -5,8 +5,10 @@ Revises: c1a7e0d2b9f4
 Create Date: 2026-10-28 10:00:00.000000
 
 Purely additive: one nullable column on `outreach_actions`. NULL for every existing row
-and for ordinary outreach; set only for a reply, to the Mailer `message_reference` (the decimal
-form of the Mailer's internal message id -- not opaque) of the inbound message being answered. No table created/dropped, no existing column touched.
+and for ordinary outreach; set only for a reply, to the Mailer `message_reference` (the Mailer's opaque
+32-hex reply token for the inbound message being answered; never a database id) of that message. The column is
+a plain nullable String with no format constraint, so the token format needs no schema change. No table
+created/dropped, no existing column touched.
 """
 from typing import Sequence, Union
 

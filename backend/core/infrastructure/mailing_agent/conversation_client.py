@@ -96,8 +96,9 @@ class MailerConversationMessage(_Strict):
     delivery_state: Optional[MailerDeliveryState] = None
     mailing_agent_reference: Optional[StrictStr] = None
     mailbox_reference: Optional[StrictStr] = None
-    # Inbound only: the reference to pass back as `reply_to_message_reference` (not opaque).
-    message_reference: Optional[StrictStr] = Field(default=None, pattern=r"^[1-9][0-9]{0,17}$")
+    # Inbound only: the OPAQUE Mailer reply handle (32 lowercase hex characters, never a database id) to
+    # pass back as `reply_to_message_reference`. Anything else is a contract violation.
+    message_reference: Optional[StrictStr] = Field(default=None, pattern=r"^[0-9a-f]{32}$")
 
     @model_validator(mode="after")
     def _delivery_state_only_on_outbound(self):

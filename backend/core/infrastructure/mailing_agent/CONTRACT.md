@@ -71,7 +71,7 @@ LeadBoost authorizes; the Mailer generates, sends, receives and owns the communi
 dashboard can show the **actual** message and what happened to it (rather than LeadBoost's own snapshot), the
 LeadBoost **backend** reads one Mailer endpoint. The browser never does: it calls only LeadBoost's
 `GET /api/v2/outreach-actions/{action_id}/mailer-state`, and never receives the Mailer's URL, key, key map, paths,
-references or schema.
+schema or any Mailer reference -- with ONE documented exception: the opaque reply handle on inbound messages (3a).
 
 ```
 Mailer   GET /integrations/leadboost/outreach-actions/{idempotency_key}/conversation?limit=20   (1..50)
@@ -97,8 +97,8 @@ LeadBoost GET /api/v2/outreach-actions/{action_id}/mailer-state      (customer-f
   bounded sizes, "outbound ⇔ has `delivery_state`"). Any drift is `mailing_agent_invalid_response` — never passed through.
 * **The LeadBoost response** is a product view, not a pass-through: `availability`
   (`available | not_dispatched | not_found_at_mailer | mailer_unavailable`), a closed `error_code` (only with
-  `mailer_unavailable`) and `mailer` (delivery state, `updated_at`, messages, `has_more`). Mailer references and mailbox
-  references are dropped. Mailer-side 404 / timeout / 5xx / bad schema are reported there with HTTP 200 — never as a false
+  `mailer_unavailable`) and `mailer` (delivery state, `updated_at`, messages, `has_more`). The Mailer's dispatch reference and mailbox
+  references are dropped; an inbound message's opaque `message_reference` is kept (3a). Mailer-side 404 / timeout / 5xx / bad schema are reported there with HTTP 200 — never as a false
   success and never as raw error text. HTTP 404 means only that the LeadBoost action is not in the caller's organization.
   The Mailer is not asked while `dispatch_attempts == 0` (`not_dispatched`).
 * **Read-only, both sides.** No write, lock, claim, retry, queue item, SMTP/IMAP or LLM call. LeadBoost never changes an
@@ -111,11 +111,21 @@ A reply is an ordinary LeadBoost action (create -> approve -> dispatch) that add
 inbound Mailer message it answers. There is no automatic reply: inbound mail is still only stored and
 classified; a further email exists only because a person created, approved and dispatched an action.
 
-* **Reference.** The conversation view (section 3) now carries `message_reference` on **inbound** messages
-  only. It is **not opaque**: it is the decimal form of the Mailer's internal message row id. This is a
-  deliberate, limited exception to the view's no-internal-ids rule. It is safe to expose only because every
-  use is resolved tenant- and mailbox-scoped by the Mailer: a message that is unknown, outbound or another
-  organization's is an indistinguishable 404.
+* **Reference.** The conversation view (section 3) carries `message_reference` on **inbound** messages only
+  (`null` on outbound). It is an **opaque token**: 32 lowercase hex characters (`^[0-9a-f]{32}$`), random,
+  persisted once per message and never regenerated. It is not derived from, and never contains, an internal
+  database id; **internal database ids are never exposed**, and neither are RFC Message-ID / In-Reply-To /
+  References values. The Mailer's response is rejected as `mailing_agent_invalid_response` if a reference
+  does not match that format.
+* **Browser exposure (decision).** The browser must say which inbound message it is answering, so this token
+  is passed through the mailer-state view as a *documented, non-secret reply handle*. It is not a bearer
+  capability: it grants nothing by itself. Every use is resolved by the Mailer tenant-, mailbox-owner- and
+  direction-scoped, so a token that is unknown, outbound, another organization's or from an unowned mailbox
+  is an indistinguishable 404. LeadBoost additionally only ever stores it in the caller's own organization's
+  action and derives the reply identity from (tenant, token). Keeping the token server-side behind a
+  LeadBoost-issued handle was considered and rejected: it adds a table and a mapping to hide a value that is
+  already non-guessable and tenant-enforced. Residual: LeadBoost does not check a token against the Mailer
+  when the action is created, so a forged or foreign token surfaces as a Mailer 404 at dispatch, after approval.
 * **LeadBoost.** `POST /api/v2/outreach-actions` accepts `reply_to_message_reference`. Enforced in the service
   layer: `mode` must be `manual` (a reply is always created `pending_review`; `automatic` is refused with
   `reply_requires_review`, whatever the organization's automatic policy says) and no `idempotency_key` may be
@@ -124,7 +134,7 @@ classified; a further email exists only because a person created, approved and d
   or a different sender/lead can never create a second independently dispatchable reply (a different
   sender/lead for the same inbound message is a 409).
 * **Mailer request.** The existing generated-outreach request gains an optional
-  `in_reply_to: {"message_reference": "<digits>"}`. The Mailer derives subject (deterministic `Re:`),
+  `in_reply_to: {"message_reference": "<32 lowercase hex>"}`. The Mailer derives subject (deterministic `Re:`),
   `In-Reply-To` (the inbound message's Message-ID) and `References` from its own stored row; none of these are
   accepted from the caller. The recipient must be the parent's sender; a contact with a native schedule is
   refused; the existing grounding and suppression gates apply unchanged.
