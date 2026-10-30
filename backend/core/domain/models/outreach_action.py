@@ -183,6 +183,11 @@ class OutreachAction(Base):
 
     idempotency_key = Column(String, nullable=False, index=True)
 
+    # Set only for a reply: the Mailer `message_reference` of the INBOUND message this action
+    # answers: the Mailer's opaque reply token (32 lowercase hex characters; no database id). Immutable
+    # like the rest of the snapshot; NULL for ordinary outreach.
+    reply_to_message_reference = Column(String, nullable=True)
+
     # Free-text, safe explanation of the current state (e.g. "automatic
     # policy requires approval", "daily send limit reached", "cancelled by
     # user") -- never raw exception/provider text. See brief #24.

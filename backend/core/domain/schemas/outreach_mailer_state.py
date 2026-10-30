@@ -49,6 +49,11 @@ class MailerConversationMessageView(_Strict):
     created_at: Optional[datetime] = None
     # Outbound only: that message's own dispatch's delivery state. None for inbound.
     delivery_state: Optional[Literal["queued", "sending", "sent", "failed", "unknown"]] = None
+    # Inbound only: the Mailer's opaque reply handle (32 lowercase hex), passed back as
+    # `reply_to_message_reference` to create a reply action. The ONE Mailer reference the browser
+    # receives (CONTRACT.md 3a): not a secret, not a database id; the Mailer enforces tenant and
+    # mailbox scope on every use.
+    message_reference: Optional[str] = None
 
 
 class MailerStateView(_Strict):

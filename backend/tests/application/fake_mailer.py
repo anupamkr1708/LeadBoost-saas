@@ -29,7 +29,9 @@ changing while a Mailer call is in flight).
 """
 
 import asyncio
+import hashlib
 import json
+import re
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
@@ -54,6 +56,15 @@ class Call:
     headers: Dict[str, str]
     status: int = 0
     raw_target: str = ""  # path + query exactly as sent (percent-encoding intact)
+
+
+# The real Mailer's reply contract: an inbound message's reference is an opaque 32-lowercase-hex token.
+REPLY_TOKEN_RE = re.compile(r"^[0-9a-f]{32}$")
+
+
+def fake_reply_token(tenant: str, idempotency_key: str, ordinal: int) -> str:
+    """Deterministic, valid 32-hex token for the ``ordinal``-th message of a scripted conversation."""
+    return hashlib.md5(f"fake-mailer|{tenant}|{idempotency_key}|{ordinal}".encode(), usedforsecurity=False).hexdigest()
 
 
 @dataclass
@@ -162,8 +173,14 @@ class FakeMailer:
             return httpx.Response(200, json=self._out(ref))
 
         if call.path == "/integrations/leadboost/outreach-requests" and call.method == "POST":
-            if not isinstance(b, dict) or set(b) - {"external_action_id", "idempotency_key", "correlation_id", "recipient", "context"}:
+            if not isinstance(b, dict) or set(b) - {"external_action_id", "idempotency_key", "correlation_id", "recipient", "context", "in_reply_to"}:
                 return httpx.Response(422, json={"detail": "invalid body"})
+            rt = b.get("in_reply_to")
+            if "in_reply_to" in b and not (
+                isinstance(rt, dict) and set(rt) == {"message_reference"}
+                and isinstance(rt["message_reference"], str) and REPLY_TOKEN_RE.fullmatch(rt["message_reference"])
+            ):
+                return httpx.Response(422, json={"detail": "invalid in_reply_to"})
             key = (t, b["idempotency_key"])
             if key in self.dispatches:
                 return httpx.Response(202, json={"accepted": True, "mailing_agent_reference": self.dispatches[key]["reference"]})
@@ -208,6 +225,8 @@ class FakeMailer:
                 delivery_state=rec["state"] if outbound else None,
                 mailing_agent_reference=rec["reference"] if outbound else None,
                 mailbox_reference=rec["mailbox"],
+                # like the real Mailer: always present; None on outbound, the stable opaque 32-hex token on inbound
+                message_reference=None if outbound else m["message_reference"],
             ))
         return {
             "action": {"accepted": True, "state": rec["state"], "mailing_agent_reference": rec["reference"],
@@ -224,9 +243,19 @@ class FakeMailer:
         self.dispatch_record(tenant, idempotency_key)["state"] = state
 
     def add_message(self, tenant: str, idempotency_key: str, *, direction: str, body: str,
-                    subject: Optional[str] = "Quick question", created_at: str = "2026-01-01T12:00:00Z"):
-        self.dispatch_record(tenant, idempotency_key)["messages"].append(
-            dict(direction=direction, body=body, subject=subject, created_at=created_at))
+                    subject: Optional[str] = "Quick question", created_at: str = "2026-01-01T12:00:00Z",
+                    message_reference: Optional[str] = None):
+        rec = self.dispatch_record(tenant, idempotency_key)
+        m = dict(direction=direction, body=body, subject=subject, created_at=created_at)
+        if direction == "inbound":
+            # Assigned once, here, so the token is stable however the conversation window slides.
+            token = message_reference or fake_reply_token(tenant, idempotency_key, len(rec["messages"]))
+            if not REPLY_TOKEN_RE.fullmatch(token):
+                raise ValueError(f"message_reference must be 32 lowercase hex characters, got {token!r}")
+            m["message_reference"] = token
+        elif message_reference is not None:
+            raise ValueError("outbound messages carry no message_reference")
+        rec["messages"].append(m)
 
     # ---- wiring ----------------------------------------------------------
     def install(self, monkeypatch, mc) -> "FakeMailer":

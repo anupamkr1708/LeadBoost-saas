@@ -336,6 +336,35 @@ def test_wire_models_match_the_mailers_declared_shape():
         "delivery_state",
         "mailing_agent_reference",
         "mailbox_reference",
+        "message_reference",  # inbound only: the reply-parent reference (C9.4)
     }
     for model in (cc.MailerConversation, cc.MailerConversationAction, cc.MailerConversationMessage):
         assert model.model_config.get("extra") == "forbid"
+
+
+def test_message_reference_must_be_the_opaque_32_hex_token():
+    import pydantic
+
+    base = dict(
+        direction="inbound",
+        message_type=None,
+        subject="s",
+        body="b",
+        body_truncated=False,
+        created_at="2026-01-01T12:00:00Z",
+        delivery_state=None,
+        mailing_agent_reference=None,
+        mailbox_reference="mb",
+    )
+    ok = cc.MailerConversationMessage(**base, message_reference="0123456789abcdef0123456789abcdef")
+    assert ok.message_reference == "0123456789abcdef0123456789abcdef"
+    assert cc.MailerConversationMessage(**base, message_reference=None).message_reference is None
+    for bad in (
+        "4",
+        "123456",
+        "0123456789ABCDEF0123456789ABCDEF",
+        "0123456789abcdef0123456789abcde",
+        "x" * 32,
+    ):
+        with pytest.raises(pydantic.ValidationError):
+            cc.MailerConversationMessage(**base, message_reference=bad)

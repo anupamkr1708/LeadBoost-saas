@@ -145,6 +145,9 @@ class OutreachErrorCode:
     IDEMPOTENCY_KEY_REUSED = "idempotency_key_reused"
     # L1: more than one active+verified sender -> the integrated path refuses to guess.
     MULTIPLE_ACTIVE_SENDERS = "multiple_active_senders"
+    # C9.4 replies: always human-reviewed, and identified only by the inbound message.
+    REPLY_REQUIRES_REVIEW = "reply_requires_review"
+    REPLY_IDEMPOTENCY_KEY_NOT_ALLOWED = "reply_idempotency_key_not_allowed"
 
 
 class OutreachError(Exception):
@@ -259,6 +262,19 @@ def derive_idempotency_key(
     return "auto:" + hashlib.sha256(digest_input).hexdigest()[:40]
 
 
+def derive_reply_idempotency_key(*, organization_id: int, reply_to_message_reference: str) -> str:
+    """The ONE identity of a reply: tenant + the inbound message it answers -- nothing else.
+    Lead, sender account, mode and the message snapshot are deliberately NOT part of it, so
+    a retry, a re-poll, a different sender or a different lead can never produce a second,
+    independently dispatchable reply to the same inbound message. A caller-supplied
+    idempotency_key is refused for replies (create_action) so it cannot bypass this."""
+    canonical = json.dumps(
+        {"organization_id": organization_id, "reply_to_message_reference": reply_to_message_reference},
+        sort_keys=True, separators=(",", ":"),
+    )
+    return "reply:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:40]
+
+
 def _get_owned_lead(db: Session, organization_id: int, lead_id: int) -> Lead:
     lead = crud.get_lead(db, lead_id)
     if lead is None or lead.organization_id != organization_id:
@@ -340,6 +356,7 @@ def _idempotency_payload_matches(
     recipient_name: Optional[str],
     subject: Optional[str],
     body: str,
+    reply_to_message_reference: Optional[str] = None,
 ) -> bool:
     """True if `existing` (found by idempotency key) represents the same
     logical request as the one currently being made -- see create_action's
@@ -354,6 +371,17 @@ def _idempotency_payload_matches(
     capture the message snapshot -- see build_message_snapshot -- so
     there is no need to separately compare correlation_id, which is
     merely derived from them)."""
+    if reply_to_message_reference:
+        # A reply's identity is (tenant, inbound message). A replay is the same request when it
+        # targets the same lead/sender/recipient; the free-text snapshot may legitimately have
+        # changed since (lead reprocessed) and must not turn a retry into a conflict. A different
+        # lead or sender for the same inbound message is NOT a replay: it is refused (409).
+        return (
+            existing.reply_to_message_reference == reply_to_message_reference
+            and existing.lead_id == lead_id
+            and existing.email_account_id == email_account_id
+            and existing.recipient_email == recipient_email
+        )
     return (
         existing.lead_id == lead_id
         and existing.email_account_id == email_account_id
@@ -362,6 +390,7 @@ def _idempotency_payload_matches(
         and (existing.recipient_name or None) == (recipient_name or None)
         and (existing.subject or None) == (subject or None)
         and existing.body == body
+        and (existing.reply_to_message_reference or None) == (reply_to_message_reference or None)
     )
 
 
@@ -373,6 +402,7 @@ def create_action(
     email_account_id: int,
     mode: str = OutreachMode.MANUAL,
     idempotency_key: Optional[str] = None,
+    reply_to_message_reference: Optional[str] = None,
 ) -> tuple[OutreachAction, bool]:
     """Creates (or, on replay, returns) an OutreachAction. Returns
     (action, created) -- created=False means an action with this
@@ -385,6 +415,22 @@ def create_action(
     error, not a silent replay of the wrong result. See
     _idempotency_payload_matches for exactly which fields are compared.
     """
+    if reply_to_message_reference:
+        # Policy lives HERE, not in the UI. First implementation: a reply is always created in
+        # PENDING_REVIEW and needs an explicit approve + dispatch. AUTOMATIC is refused before
+        # anything is read or written, so the AUTOMATIC policy branch below (which can set
+        # APPROVED) is unreachable for replies. Ordinary outreach is unchanged.
+        if mode != OutreachMode.MANUAL:
+            raise OutreachError(
+                OutreachErrorCode.REPLY_REQUIRES_REVIEW,
+                "A reply action must be created in manual mode and approved explicitly.",
+            )
+        if idempotency_key:
+            raise OutreachError(
+                OutreachErrorCode.REPLY_IDEMPOTENCY_KEY_NOT_ALLOWED,
+                "A reply action is identified by the inbound message; do not supply an idempotency_key.",
+            )
+
     lead = _get_owned_lead(db, organization_id, lead_id)
     sender = _get_eligible_sender(db, organization_id, email_account_id)
 
@@ -392,15 +438,22 @@ def create_action(
         raise OutreachError(OutreachErrorCode.RECIPIENT_INVALID, "Lead has no recipient email address.")
 
     snapshot = build_message_snapshot(db, lead)
-    key = idempotency_key or derive_idempotency_key(
-        lead_id=lead.id,
-        email_account_id=sender.id,
-        mode=mode,
-        recipient_email=lead.email,
-        recipient_name=lead.contact_name,
-        subject=snapshot.subject,
-        body=snapshot.body,
-    )
+    if reply_to_message_reference:
+        key = derive_reply_idempotency_key(
+            organization_id=organization_id, reply_to_message_reference=reply_to_message_reference
+        )
+    elif idempotency_key:
+        key = idempotency_key
+    else:
+        key = derive_idempotency_key(
+            lead_id=lead.id,
+            email_account_id=sender.id,
+            mode=mode,
+            recipient_email=lead.email,
+            recipient_name=lead.contact_name,
+            subject=snapshot.subject,
+            body=snapshot.body,
+        )
 
     existing = crud.get_outreach_action_by_idempotency_key(db, organization_id, key)
     if existing is not None:
@@ -413,6 +466,7 @@ def create_action(
             recipient_name=lead.contact_name,
             subject=snapshot.subject,
             body=snapshot.body,
+            reply_to_message_reference=reply_to_message_reference,
         ):
             return existing, False
         raise OutreachError(
@@ -481,6 +535,7 @@ def create_action(
             body=snapshot.body,
             correlation_id=snapshot.correlation_id,
             idempotency_key=key,
+            reply_to_message_reference=reply_to_message_reference,
             reason=reason,
             approved_at=datetime.now(timezone.utc) if state == OutreachState.APPROVED else None,
         )
@@ -503,6 +558,7 @@ def create_action(
                 recipient_name=lead.contact_name,
                 subject=snapshot.subject,
                 body=snapshot.body,
+                reply_to_message_reference=reply_to_message_reference,
             ):
                 return existing, False
             raise OutreachError(
@@ -713,6 +769,10 @@ async def dispatch_action(db: Session, *, organization_id: int, action_id: int) 
         recipient_company=lead.company_name,
         value_proposition=value_proposition,
         recipient_facts=build_recipient_facts(lead),
+        **(
+            {"reply_to_message_reference": action.reply_to_message_reference}
+            if action.reply_to_message_reference else {}
+        ),
     )
 
     if result.accepted:

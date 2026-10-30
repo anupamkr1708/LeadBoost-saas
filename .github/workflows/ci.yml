@@ -259,9 +259,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: anupamkr1708/LeadBoost-mail-agent
-          # Mailer main at the C15 merge (PR #16: C15.1 fail-closed auth + C15.1b tenant-scoped inbound
-          # webhook). Previously pinned to the C9.3 merge (e19f750, PR #13), which predates C15.
-          ref: 798e858ac80cf096c4ee7a311d85da9481ddc10d
+          # Mailer main after PR #27: opaque tenant-scoped reply references and
+          # server-side RFC-threaded dispatch for LeadBoost-managed replies.
+          ref: a0f9454a74e1395e14d4deb510844db743559846
           path: mailer-agent
 
       - uses: actions/setup-python@v5

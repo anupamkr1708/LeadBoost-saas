@@ -96,6 +96,9 @@ class MailerConversationMessage(_Strict):
     delivery_state: Optional[MailerDeliveryState] = None
     mailing_agent_reference: Optional[StrictStr] = None
     mailbox_reference: Optional[StrictStr] = None
+    # Inbound only: the OPAQUE Mailer reply handle (32 lowercase hex characters, never a database id) to
+    # pass back as `reply_to_message_reference`. Anything else is a contract violation.
+    message_reference: Optional[StrictStr] = Field(default=None, pattern=r"^[0-9a-f]{32}$")
 
     @model_validator(mode="after")
     def _delivery_state_only_on_outbound(self):
@@ -103,6 +106,8 @@ class MailerConversationMessage(_Strict):
         # never does. Anything else is a contract violation -- never guessed at.
         if (self.direction == "outbound") != (self.delivery_state is not None):
             raise ValueError("delivery_state must be present exactly for outbound messages")
+        if self.direction == "outbound" and self.message_reference is not None:
+            raise ValueError("message_reference is only valid on inbound messages")
         return self
 
 

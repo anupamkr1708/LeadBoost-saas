@@ -54,8 +54,9 @@ MAX_SUBJECT_CHARS = 998  # RFC 5322 line limit; a longer "subject" is not a subj
 
 
 def _to_view(conversation: MailerConversation) -> MailerStateView:
-    """Mailer wire model -> customer product model. Mailer references, mailbox
-    references and message_type are deliberately dropped: they are internal."""
+    """Mailer wire model -> customer product model. The Mailer's dispatch reference, mailbox
+    references and message_type are deliberately dropped: they are internal. The one exception is an
+    inbound message's opaque `message_reference`, kept as the documented reply handle."""
     return MailerStateView(
         delivery_state=conversation.action.state,
         updated_at=conversation.action.updated_at,
@@ -68,6 +69,7 @@ def _to_view(conversation: MailerConversation) -> MailerStateView:
                 body_truncated=m.body_truncated,
                 created_at=m.created_at,
                 delivery_state=m.delivery_state,
+                message_reference=m.message_reference,
             )
             for m in conversation.messages
         ],

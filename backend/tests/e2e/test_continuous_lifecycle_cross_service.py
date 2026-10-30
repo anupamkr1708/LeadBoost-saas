@@ -33,6 +33,7 @@ import json
 import logging
 import os
 import subprocess
+import re
 import uuid
 from email import message_from_bytes
 from pathlib import Path
@@ -383,7 +384,14 @@ def test_continuous_leadboost_mailer_smtp_imap_leadboost_lifecycle(
     out_view, in_view = mailer["messages"]
     assert out_view["body"].strip() == generated_body.strip() and out_view["subject"] == SUBJECT
     assert in_view["body"] == REPLY_BODY and in_view["subject"] == REPLY_SUBJECT  # verbatim data
-    assert set(out_view) == {"direction", "subject", "body", "body_truncated", "created_at", "delivery_state"}
+    assert set(out_view) == {
+        "direction", "subject", "body", "body_truncated", "created_at", "delivery_state", "message_reference",
+    }
+    assert out_view["message_reference"] is None            # outbound messages carry no reply reference
+    inbound_ref = in_view["message_reference"]              # C9.4: the Mailer's OPAQUE reply token, never a row id
+    assert re.fullmatch(r"[0-9a-f]{32}", inbound_ref)
+    inbound_row = drv.sql("SELECT id, reply_reference FROM messages WHERE direction = 'inbound'")
+    assert [r["reply_reference"] for r in inbound_row] == [inbound_ref] and inbound_ref != str(inbound_row[0]["id"])
 
     # ---- 10. nothing internal or secret reaches the browser.
     for forbidden in (
@@ -427,6 +435,138 @@ def test_continuous_leadboost_mailer_smtp_imap_leadboost_lifecycle(
         client.get(f"/api/v2/outreach-actions/{action_id}", headers=t.h).json()["state"]
         == OutreachState.SUBMITTED
     )
+
+    # ======================================================================================================
+    # C9.4 -- the NEW reply workflow, continuing the same real conversation. Everything above stays exactly as
+    # it was: inbound handling alone sent nothing. From here ONLY an explicitly created, approved and
+    # dispatched LeadBoost reply action may produce the next outbound email.
+    # ======================================================================================================
+    reply_url = "/api/v2/outreach-actions"
+
+    # ---- 13. policy enforced in the service layer: automatic mode / an explicit key are refused, nothing created.
+    def _action_count():
+        return len(client.get(reply_url, headers=t.h).json())
+
+    actions_before = _action_count()
+    base = {"lead_id": lead_id, "email_account_id": account_id, "reply_to_message_reference": inbound_ref}
+    refused_auto = client.post(reply_url, headers=t.h, json={**base, "mode": "automatic"})
+    assert refused_auto.status_code == 422 and refused_auto.json()["detail"]["error_code"] == "reply_requires_review"
+    refused_key = client.post(reply_url, headers=t.h, json={**base, "mode": "manual", "idempotency_key": "x-1"})
+    assert refused_key.status_code == 422
+    assert _action_count() == actions_before
+
+    # ---- 14. create the reply action for the inbound message: PENDING_REVIEW, and the Mailer is not involved.
+    created_reply = client.post(reply_url, headers=t.h, json={**base, "mode": "manual"})
+    assert created_reply.status_code == 201, created_reply.text
+    reply_action = created_reply.json()
+    reply_id = reply_action["id"]
+    assert reply_action["state"] == "pending_review" and reply_action["reply_to_message_reference"] == inbound_ref
+    assert reply_action["idempotency_key"].startswith("reply:")
+    # the same inbound message again (retry / re-poll) returns the SAME action, never a second one
+    replay = client.post(reply_url, headers=t.h, json={**base, "mode": "manual"})
+    assert replay.status_code == 201 and replay.json()["id"] == reply_id
+    assert _action_count() == actions_before + 1
+
+    # ---- 15. NO second outbound before approval: not dispatchable, nothing at the Mailer, nothing on the wire.
+    assert _dispatch(client, t.h, reply_id).status_code in (400, 409)
+    assert drv.sql("SELECT count(*) AS n FROM external_dispatches") == [{"n": 1}]
+    assert drv.sql("SELECT count(*) AS n FROM messages WHERE direction = 'outbound'") == [{"n": 1}]
+    assert len(_wire_messages(infra)) == 1
+
+    # ---- 16. explicit approval, then dispatch through LeadBoost's real client -> the Mailer's real API.
+    assert client.post(f"/api/v2/outreach-actions/{reply_id}/approve", headers=t.h).status_code == 200
+    dispatched_reply = _dispatch(client, t.h, reply_id)
+    assert (
+        dispatched_reply.status_code == 200 and dispatched_reply.json()["state"] == OutreachState.SUBMITTED
+    ), dispatched_reply.text
+    reply_where = f"idempotency_key = {_quote(_action_row(reply_id)['idempotency_key'])}"
+    (rd,) = drv.sql(
+        f"SELECT state, message_id, organization_id, mailbox_id, "
+        f"grounding_context->'reply_parent'->>'message_id' AS parent_message_id "
+        f"FROM external_dispatches WHERE {reply_where}"
+    )
+
+    # The opaque public token and the Mailer's internal parent row ID
+    # are intentionally different identifiers.
+    expected_parent_id = str(inbound_row[0]["id"])
+
+    assert (
+        rd["state"],
+        rd["message_id"],
+        rd["organization_id"],
+        rd["parent_message_id"],
+    ) == (
+        "queued",
+        None,
+        "tenant-a",
+        expected_parent_id,
+    )
+
+    # The public reference must remain unchanged and opaque.
+    assert inbound_row[0]["reply_reference"] == inbound_ref
+    assert inbound_ref != expected_parent_id
+    assert rd["mailbox_id"] == box["id"]
+    assert drv.sql("SELECT count(*) AS n FROM external_dispatches") == [{"n": 2}]
+    assert len(_wire_messages(infra)) == 1                    # accepted != sent
+
+    # ---- 17. the Mailer's REAL generation cycle for the reply (deterministic fake LLM). Still nothing sent.
+    reply_body = "Hi Jamie,\n\nThanks for getting back to me. What day and time suits you for a short call?\n\nBest,\nSales"
+    gen2 = drv.run(
+        "generate", json.dumps({"subject": "A subject the model must not control", "body": reply_body, "reasoning": "c9.4"})
+    )
+    assert gen2["results"] == [{"outcome": "generated", "reason": None, "persisted": True}], gen2
+    assert gen2["llm_calls"] == 1 and len(_wire_messages(infra)) == 1
+    (g,) = drv.sql(f"SELECT state, message_id FROM external_dispatches WHERE {reply_where}")
+    (rm,) = drv.sql(
+        "SELECT message_type, subject, in_reply_to_header, references_header, message_id_header "
+        f"FROM messages WHERE id = {g['message_id']}"
+    )
+    assert g["state"] == "queued" and rm["message_type"] == "reply" and rm["message_id_header"] is None
+    assert rm["subject"] == REPLY_SUBJECT                     # deterministic Re: subject, never the model's
+    assert rm["in_reply_to_header"] == inbound_message_id     # the immediate parent: the INBOUND message
+    assert rm["references_header"] == f"{wire_message_id} {inbound_message_id}"
+
+    # ---- 18. the Mailer's REAL dispatch cycle -> real SMTP into the sink: exactly one more message.
+    sent2 = drv.run("dispatch", infra["smtp_port"], extra_env={"LIVE_SENDING_ENABLED": "true"})
+    assert [r["outcome"] for r in sent2["results"]] == ["sent"], sent2
+    wire_all = _wire_messages(infra)
+    assert len(wire_all) == 2
+    reply_wire = message_from_bytes(base64.b64decode(wire_all[1]["raw_b64"]))
+    assert wire_all[1]["tls"] and wire_all[1]["authenticated"]
+    assert wire_all[1]["mail_from"] == SENDER and wire_all[1]["rcpt_tos"] == ["lead@example.com"]
+    assert reply_wire["In-Reply-To"] == inbound_message_id
+    assert reply_wire["References"].split() == [wire_message_id, inbound_message_id]
+    assert reply_wire["Subject"] == REPLY_SUBJECT
+    assert reply_wire["Message-ID"] and reply_wire["Message-ID"] not in (wire_message_id, inbound_message_id)
+    part = reply_wire.get_payload()[0] if reply_wire.is_multipart() else reply_wire
+    assert part.get_payload(decode=True).decode().replace("\r\n", "\n").strip() == reply_body.strip()
+    (rs,) = drv.sql(
+        f"SELECT d.state, m.message_id_header FROM external_dispatches d JOIN messages m ON m.id = d.message_id "
+        f"WHERE d.{reply_where}"
+    )
+    assert rs["state"] == "sent" and rs["message_id_header"] == reply_wire["Message-ID"]  # a real send, recorded as one
+
+    # ---- 19. the customer view shows the real thread; the first action is untouched.
+    thread = _state(client, t, reply_id).json()
+    assert thread["availability"] == "available" and thread["mailer"]["delivery_state"] == "sent"
+    assert [x["direction"] for x in thread["mailer"]["messages"]] == ["outbound", "inbound", "outbound"]
+    assert thread["mailer"]["messages"][-1]["body"].strip() == reply_body.strip()
+    assert _action_row(action_id) == action_after_dispatch
+
+    # ---- 20. retries create nothing new: re-dispatch, re-create, another dispatch cycle, another poll.
+    assert _dispatch(client, t.h, reply_id).status_code in (200, 400, 409)
+    again_reply = client.post(reply_url, headers=t.h, json={**base, "mode": "manual"})
+    assert again_reply.json()["id"] == reply_id and _action_count() == actions_before + 1
+    drv.run("generate", json.dumps({"subject": "x", "body": "unused", "reasoning": "none queued"}))
+    idle = drv.run("dispatch", infra["smtp_port"], extra_env={"LIVE_SENDING_ENABLED": "true"})
+    assert idle["results"] == [] or all(r["outcome"] != "sent" for r in idle["results"]), idle
+    drv.run("imap", "forget-seen", *imap)
+    drv.run("poll", extra_env={"AUTO_REPLY_ENABLED": "true", "GROQ_API_KEY": ""})
+    assert len(_wire_messages(infra)) == 2
+    assert drv.sql("SELECT count(*) AS n FROM messages WHERE direction = 'outbound'") == [{"n": 2}]
+    assert drv.sql("SELECT count(*) AS n FROM messages WHERE direction = 'inbound'") == [{"n": 1}]
+    assert drv.sql("SELECT count(*) AS n FROM external_dispatches") == [{"n": 2}]
+    assert drv.sql(f"SELECT next_action_at FROM contacts WHERE id = {contact_id}") == [{"next_action_at": None}]
 
     # ---- 12. logs: no credential, no ciphertext, no attacker-controlled reply text -- Mailer API process,
     #          every Mailer cycle, and LeadBoost's own logs.

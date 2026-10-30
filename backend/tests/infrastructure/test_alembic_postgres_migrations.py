@@ -78,7 +78,8 @@ _ALL_TABLES_AFTER_P1_4 = _ALL_TABLES_AFTER_P1_3 | {
 _P1_2_REVISION = "61258798a87a"
 _P1_3_REVISION = "1e7ab6ba0976"
 _P1_4_REVISION = "baee12037c73"
-_L1_REVISION = "c1a7e0d2b9f4"  # current head: email_accounts <-> Mailer mailbox link
+_L1_REVISION = "c1a7e0d2b9f4"  # email_accounts <-> Mailer mailbox link
+_C94_REVISION = "d4b8f2a6c113"  # current head: outreach_actions.reply_to_message_reference
 
 
 def _database_url_with_name(admin_url: str, db_name: str) -> str:
@@ -190,10 +191,10 @@ class TestFreshPostgresUpgrade:
         _run_alembic("upgrade", "head", database_url=disposable_db)
 
         current = _run_alembic("current", database_url=disposable_db)
-        assert _L1_REVISION in current.stdout
+        assert _C94_REVISION in current.stdout
 
         heads = _run_alembic("heads", database_url=disposable_db)
-        assert _L1_REVISION in heads.stdout
+        assert _C94_REVISION in heads.stdout
         assert heads.stdout.strip().count("\n") == 0  # exactly one head line
 
     def test_alembic_check_clean_after_fresh_upgrade(self, disposable_db):
@@ -270,7 +271,7 @@ class TestExistingSchemaAdoption:
         assert stamp_result.returncode == 0, stamp_result.stderr
 
         current = _run_alembic("current", database_url=disposable_db)
-        assert _L1_REVISION in current.stdout
+        assert _C94_REVISION in current.stdout
 
         upgrade_result = _run_alembic("upgrade", "head", database_url=disposable_db)
         assert upgrade_result.returncode == 0
@@ -465,7 +466,7 @@ class TestL1MailerMailboxLinkMigration:
             " security_mode, is_active, credential_type, verification_status)"
             " VALUES (1, 'smtp', 'a@acme.test', 'h', 587, 'starttls', true, 'smtp_password', 'verified')",
         )
-        assert _run_alembic("downgrade", "-1", database_url=disposable_db).returncode == 0
+        assert _run_alembic("downgrade", _P1_4_REVISION, database_url=disposable_db).returncode == 0
         cols = {r[0] for r in self._q(
             disposable_db,
             "SELECT column_name FROM information_schema.columns WHERE table_name='email_accounts'")}
@@ -474,3 +475,55 @@ class TestL1MailerMailboxLinkMigration:
         assert self._q(disposable_db, "SELECT count(*) FROM email_accounts") == [(1,)]
         # and it can be re-applied
         assert _run_alembic("upgrade", "head", database_url=disposable_db).returncode == 0
+
+
+class TestC94ReplyParentMigration:
+    """C9.4 is one additive nullable column on outreach_actions: nothing else moves, existing rows
+    keep NULL, and it downgrades cleanly (dropping only that column)."""
+
+    def _q(self, url, sql):
+        eng = create_engine(url)
+        try:
+            with eng.begin() as c:
+                res = c.execute(text(sql))
+                return res.fetchall() if res.returns_rows else []
+        finally:
+            eng.dispose()
+
+    def _cols(self, url):
+        return {
+            r[0]: (r[1], r[2])
+            for r in self._q(
+                url,
+                "SELECT column_name, is_nullable, data_type FROM information_schema.columns "
+                "WHERE table_name='outreach_actions'",
+            )
+        }
+
+    def test_upgrade_adds_exactly_one_nullable_column_and_keeps_the_idempotency_constraint(self, disposable_db):
+        assert _run_alembic("upgrade", _L1_REVISION, database_url=disposable_db).returncode == 0
+        before = self._cols(disposable_db)
+        assert "reply_to_message_reference" not in before
+        assert _run_alembic("upgrade", "head", database_url=disposable_db).returncode == 0
+        after = self._cols(disposable_db)
+        assert set(after) - set(before) == {"reply_to_message_reference"}
+        assert set(before) - set(after) == set()
+        assert after["reply_to_message_reference"][0] == "YES"             # nullable
+        constraints = {r[0] for r in self._q(
+            disposable_db, "SELECT conname FROM pg_constraint WHERE conrelid = 'outreach_actions'::regclass")}
+        assert "uq_outreach_actions_org_idempotency_key" in constraints
+
+    def test_downgrade_drops_only_that_column_and_reapplies(self, disposable_db):
+        assert _run_alembic("upgrade", "head", database_url=disposable_db).returncode == 0
+        with_col = self._cols(disposable_db)
+        assert _run_alembic("downgrade", "-1", database_url=disposable_db).returncode == 0
+        without = self._cols(disposable_db)
+        assert set(with_col) - set(without) == {"reply_to_message_reference"}
+        assert _run_alembic("upgrade", "head", database_url=disposable_db).returncode == 0
+        assert self._cols(disposable_db) == with_col
+
+    def test_upgrade_body_has_no_drops(self):
+        source = (_BACKEND_ROOT / "alembic" / "versions"
+                  / "20261028_1000_d4b8f2a6c113_c9_4_outreach_action_reply_parent.py").read_text()
+        body = source[source.index("def upgrade()"):source.index("def downgrade()")]
+        assert "drop_" not in body and "DROP" not in body and "add_column" in body

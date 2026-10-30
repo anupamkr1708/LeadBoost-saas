@@ -208,6 +208,16 @@ LeadBoost-authorized action. (Native follow-up and auto-reply exist for Mailer-n
 `tests/test_leadboost_native_isolation.py`: follow-up claims, forced follow-ups and reply-driven automation all exclude
 LeadBoost-integration contacts, while unsubscribe still suppresses.)
 
+### Replying to an inbound message (C9.4)
+
+See CONTRACT.md section 3a for the contract. In short: read an inbound message's `message_reference` from the
+mailer-state view, create an action with `reply_to_message_reference` (manual only, no explicit idempotency key),
+approve it, dispatch it. The Mailer then generates the reply (grounded on the real conversation), threads it to
+that inbound message, and the normal delivery worker sends it. `message_reference` is the Mailer's opaque
+32-hex reply token (never a database id) and is the one Mailer reference the browser receives; the Mailer
+resolves it tenant- and mailbox-scoped on every use. Approval authorizes the action rather than previewing the
+generated text.
+
 ## 6. Failure and consistency model
 
 | Situation | What happens | What it does **not** guarantee |
