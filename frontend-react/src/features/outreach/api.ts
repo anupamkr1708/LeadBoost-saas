@@ -5,6 +5,8 @@ import type {
   OutreachMailerState,
   OutreachPolicy,
   OutreachPolicyUpdatePayload,
+  OutreachReplyCreatePayload,
+  ReplyDraft,
 } from "@/types/api";
 
 /**
@@ -41,6 +43,25 @@ export const outreachApi = {
 
   dispatch: (actionId: number) =>
     apiClient.post<OutreachAction>(`/api/v2/outreach-actions/${actionId}/dispatch`).then((r) => r.data),
+
+  // ---- C9.5 managed replies. Every call goes to the LeadBoost API; the browser never talks to the Mailing Agent.
+  /** Create the (one) reply action for an inbound message. Sends nothing and generates nothing. */
+  createReply: (payload: OutreachReplyCreatePayload) =>
+    apiClient.post<OutreachAction>("/api/v2/outreach-actions", payload).then((r) => r.data),
+
+  /** Ask the Mailing Agent to GENERATE the draft. Not a send: the draft is held until approved and sent. Idempotent. */
+  startReplyDraft: (actionId: number) =>
+    apiClient.post<ReplyDraft>(`/api/v2/outreach-actions/${actionId}/reply-draft`).then((r) => r.data),
+
+  /** Read-only: the exact persisted subject/body. */
+  getReplyDraft: (actionId: number) =>
+    apiClient.get<ReplyDraft>(`/api/v2/outreach-actions/${actionId}/reply-draft`).then((r) => r.data),
+
+  /** Approve the EXACT draft that was on screen, identified by its digest. The server re-checks it. */
+  approveReply: (actionId: number, contentSha256: string) =>
+    apiClient
+      .post<OutreachAction>(`/api/v2/outreach-actions/${actionId}/approve`, { content_sha256: contentSha256 })
+      .then((r) => r.data),
 
   getPolicy: (orgId: number) =>
     apiClient.get<OutreachPolicy>(`/api/v2/organizations/${orgId}/outreach-policy`).then((r) => r.data),

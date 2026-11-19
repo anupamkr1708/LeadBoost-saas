@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { QualificationBadge } from "@/components/shared/status-badge";
 import { MailerStatePanel } from "@/components/outreach/mailer-state-panel";
+import { ReplyComposer } from "@/components/outreach/reply-composer";
 import { useUpdateLead } from "@/features/leads/hooks";
 import { useEmailAccounts } from "@/features/email-accounts/hooks";
 import {
@@ -21,7 +22,7 @@ import {
 } from "@/features/outreach/hooks";
 import { useAuthStore } from "@/store/auth-store";
 import { ensureProtocol, formatDateTime, getHostname } from "@/lib/utils";
-import type { Lead, OutreachStateValue } from "@/types/api";
+import type { Lead, MailerConversationMessage, OutreachStateValue } from "@/types/api";
 
 // P1.4: display treatment for the closed OutreachAction state vocabulary
 // -- see backend core/domain/models/outreach_action.py::OutreachState.
@@ -63,7 +64,31 @@ export function OutreachCard({ lead }: { lead: Lead }) {
   // is ever "live" for a lead in this phase (no campaigns/sequences --
   // see the P1.4 brief's explicit non-goals), so the first match is enough.
   const { data: actions } = useOutreachActionsForLead(lead.id);
-  const activeAction = useMemo(() => (actions ?? []).find((a) => a.state !== "cancelled"), [actions]);
+  // Replies (C9.5) are separate actions managed in the reply composer; they must never be taken for the
+  // lead's ordinary outreach action, or the ordinary Approve/Send controls below would act on a reply.
+  const activeAction = useMemo(
+    () => (actions ?? []).find((a) => a.state !== "cancelled" && !a.reply_to_message_reference),
+    [actions]
+  );
+
+  // The inbound message the user chose to answer (one at a time). Its opaque reference is carried as data.
+  const [replyTo, setReplyTo] = useState<{
+    reference: string;
+    subject: string | null;
+    body: string;
+    bodyTruncated: boolean;
+    receivedAt: string | null;
+  } | null>(null);
+  const replyAction = useMemo(
+    () => (replyTo ? (actions ?? []).find((a) => a.reply_to_message_reference === replyTo.reference) ?? null : null),
+    [actions, replyTo]
+  );
+  // The reply goes out from the same mailbox the reply action was created with, else the chosen sender.
+  const replySender = useMemo(() => {
+    const id = replyAction?.email_account_id ?? (selectedSenderId ? Number(selectedSenderId) : null);
+    const account = (emailAccounts ?? []).find((a) => a.id === id);
+    return account ? { id: account.id, label: account.display_name || account.email_address } : null;
+  }, [replyAction, selectedSenderId, emailAccounts]);
 
   const createAction = useCreateOutreachAction(lead.id);
   const approveAction = useApproveOutreachAction(lead.id);
@@ -257,7 +282,39 @@ export function OutreachCard({ lead }: { lead: Lead }) {
       {/* C9.3: read-only Mailing Agent delivery state + conversation. Only once a hand-off has
           been attempted (the backend also won't ask the Mailing Agent before that). */}
       {activeAction && activeAction.dispatch_attempts > 0 && (
-        <MailerStatePanel actionId={activeAction.id} leadboostState={activeAction.state} />
+        <MailerStatePanel
+          actionId={activeAction.id}
+          leadboostState={activeAction.state}
+          onReply={(m: MailerConversationMessage) =>
+            m.message_reference &&
+            setReplyTo({
+              reference: m.message_reference,
+              subject: m.subject,
+              body: m.body,
+              // Anything other than an explicit `false` is treated as shortened: never imply the excerpt is whole.
+              bodyTruncated: m.body_truncated !== false,
+              receivedAt: m.created_at,
+            })
+          }
+        />
+      )}
+
+      {/* C9.5: one reply at a time, for the exact inbound message that was selected. */}
+      {activeAction && replyTo && (
+        <ReplyComposer
+          key={replyTo.reference}
+          lead={lead}
+          senderAccountId={replySender?.id ?? null}
+          senderLabel={replySender?.label ?? null}
+          messageReference={replyTo.reference}
+          inboundSubject={replyTo.subject}
+          inboundBody={replyTo.body}
+          inboundBodyTruncated={replyTo.bodyTruncated}
+          inboundReceivedAt={replyTo.receivedAt}
+          conversationActionId={activeAction.id}
+          replyAction={replyAction}
+          onClose={() => setReplyTo(null)}
+        />
       )}
     </Card>
   );

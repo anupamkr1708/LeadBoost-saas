@@ -431,6 +431,14 @@ export interface OutreachAction {
   mailing_agent_reference: string | null;
   dispatch_attempts: number;
   last_dispatch_error: string | null;
+  /** Managed replies only (null/absent otherwise). An opaque token identifying the inbound message answered:
+   *  carry it as data, never render it. */
+  reply_to_message_reference?: string | null;
+  /** C9.5, replies only: when the Mailing Agent accepted the request to generate the draft. */
+  reply_draft_requested_at?: string | null;
+  /** C9.5, replies only: digest + version of the exact draft the user approved (set by approval). */
+  approved_content_sha256?: string | null;
+  approved_draft_version?: number | null;
   created_at: string;
   updated_at: string | null;
 }
@@ -452,6 +460,9 @@ export interface MailerConversationMessage {
   created_at: string | null;
   /** Outbound messages only; null for inbound. */
   delivery_state: MailerDeliveryState | null;
+  /** Inbound messages only (null for outbound / when absent): an opaque token naming this message as the
+   *  parent of a reply. Data, not display text -- never render it. */
+  message_reference?: string | null;
 }
 
 export interface MailerStateView {
@@ -475,6 +486,46 @@ export interface OutreachActionCreatePayload {
   email_account_id: number;
   mode?: OutreachMode;
   idempotency_key?: string;
+}
+
+// C9.5 -- managed replies. A reply is a different request from ordinary outreach (manual only, identity derived by
+// the server from the inbound message, no caller idempotency key), so it has its own payload type rather than
+// adding reply fields to the ordinary one.
+export interface OutreachReplyCreatePayload {
+  lead_id: number;
+  email_account_id: number;
+  /** The opaque token of the exact inbound message being answered. */
+  reply_to_message_reference: string;
+  mode?: "manual";
+}
+
+/** What GET/POST /api/v2/outreach-actions/{id}/reply-draft reports. `not_started` = nothing asked for yet;
+ *  `generating` = the Mailing Agent is writing it; `awaiting_approval` = ready to review (content present);
+ *  the rest follow the send. `sent` means SMTP accepted it -- not that the recipient received it; `unknown` means
+ *  the outcome could not be established and the message must not be resent. */
+export type ReplyDraftState =
+  | "not_started"
+  | "generating"
+  | "awaiting_approval"
+  | "queued"
+  | "sending"
+  | "sent"
+  | "failed"
+  | "unknown"
+  | "cancelled"
+  | "legacy"; // a reply created before exact-content review existed: no draft was ever reviewed for it
+
+/** The Mailing Agent's persisted draft, projected by the LeadBoost backend. `subject`, `body`,
+ *  `content_sha256` and `draft_version` are present together, exactly when a draft exists. `body` is
+ *  Mailer-generated text derived from untrusted inbound mail: render as plain text only. */
+export interface ReplyDraft {
+  state: ReplyDraftState;
+  subject: string | null;
+  body: string | null;
+  /** Opaque fingerprint of this exact subject+body. Echoed back to approve; never shown. */
+  content_sha256: string | null;
+  draft_version: number | null;
+  updated_at: string | null;
 }
 
 export interface OutreachPolicy {
