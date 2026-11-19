@@ -4,6 +4,7 @@ import {
   deriveReplyView,
   findReplyAction,
   hasCompleteDraft,
+  isApprovalStale,
   isLegacyReplyAction,
   isValidMessageReference,
   selectOrdinaryActiveAction,
@@ -328,5 +329,106 @@ describe("replies created before exact-content review existed (C9.4)", () => {
     expect(view(legacy("dispatch_failed"), undefined).canCancel).toBe(true);
     expect(view(legacy("dispatching"), undefined).canCancel).toBe(false);
     expect(view(legacy("submitted"), undefined).canCancel).toBe(false);
+  });
+});
+
+describe("an approval that no longer matches the held draft is stale, and is not sendable", () => {
+  const OTHER = "c".repeat(64);
+  const approved = (over: Partial<OutreachAction> = {}) =>
+    action({ state: "approved", approved_content_sha256: DIGEST, approved_draft_version: 1, ...over });
+  const failedRelease = (over: Partial<OutreachAction> = {}) =>
+    action({ state: "dispatch_failed", approved_content_sha256: DIGEST, dispatch_attempts: 1, ...over });
+  const held = (over: Partial<ReplyDraft> = {}) => draft("awaiting_approval", over);
+
+  it("matching digests are not stale: Send (and the retry after a failed release) stay available", () => {
+    expect(isApprovalStale(approved(), held(), false)).toBe(false);
+    const a = view(approved(), held());
+    expect([a.stage, a.canSend, a.canApprove]).toEqual(["approved", true, false]);
+    const r = view(failedRelease(), held());
+    expect([r.stage, r.canSend]).toEqual(["release_failed", true]);
+  });
+
+  it.each([
+    ["approved", () => approved()],
+    ["dispatch_failed", () => failedRelease()],
+  ])("a changed digest (%s) is stale: nothing can approve or send it, Cancel remains", (_n, make) => {
+    const v = view(make(), held({ content_sha256: OTHER }));
+    expect(v.stage).toBe("approval_stale");
+    expect(v.label).toBe("Draft changed since approval");
+    expect([v.canApprove, v.canSend, v.canGenerate]).toEqual([false, false, false]);
+    expect(v.canCancel).toBe(true);
+    expect(v.showDraft).toBe(true);        // the current held draft may be shown, captioned as such by the component
+  });
+
+  it.each([
+    ["approved", () => approved()],
+    ["dispatch_failed", () => failedRelease()],
+  ])("an absent held-draft digest (%s) is stale, and no draft text is shown", (_n, make) => {
+    for (const missing of [null, ""]) {
+      const v = view(make(), held({ content_sha256: missing }));
+      expect(v.stage).toBe("approval_stale");
+      expect([v.canApprove, v.canSend]).toEqual([false, false]);
+      expect(v.canCancel).toBe(true);
+      expect(v.showDraft).toBe(false);     // existing rule: a draft without its digest is never displayed
+    }
+  });
+
+  it("a stale reply is not cancellable while a request is in flight (duplicate-click protection)", () => {
+    const v = view(approved(), held({ content_sha256: OTHER }), { cancelling: true });
+    expect(v.stage).toBe("approval_stale");
+    expect([v.busy, v.canCancel, v.canSend]).toEqual([true, false, false]);
+  });
+
+  it.each([["null", null], ["empty", ""]])(
+    "an action with no stored approved digest (%s) is NOT stale: current behaviour is unchanged",
+    (_n, sha) => {
+      for (const make of [(o: Partial<OutreachAction>) => action({ state: "approved", ...o }), (o: Partial<OutreachAction>) => action({ state: "dispatch_failed", ...o })]) {
+        const a = make({ approved_content_sha256: sha });
+        expect(isApprovalStale(a, held({ content_sha256: OTHER }), false)).toBe(false);
+        const v = view(a, held({ content_sha256: OTHER }));
+        expect(v.stage).not.toBe("approval_stale");
+        expect(v.canSend).toBe(false);
+      }
+      expect(view(action({ state: "approved", approved_content_sha256: sha }), held()).stage).toBe("approved");
+    }
+  );
+
+  it("no evidence either way when the draft is not loaded or its read failed: unchanged", () => {
+    expect(isApprovalStale(approved(), undefined, false)).toBe(false);
+    expect(isApprovalStale(approved(), undefined, true)).toBe(false);
+    expect(isApprovalStale(approved(), held({ content_sha256: OTHER }), true)).toBe(false);   // read failed: no verdict
+    const notLoaded = view(approved(), undefined);
+    expect([notLoaded.stage, notLoaded.canSend]).toEqual(["approved", true]);
+    const readFailed = view(failedRelease(), undefined, {}, true);
+    expect([readFailed.stage, readFailed.canSend]).toEqual(["release_failed", true]);
+    const staleCopyFailedRead = view(approved(), held({ content_sha256: OTHER }), {}, true);
+    expect([staleCopyFailedRead.stage, staleCopyFailedRead.canSend]).toEqual(["approved", true]);
+  });
+
+  it.each(["generating", "queued", "sending", "sent", "failed", "unknown", "cancelled"] as ReplyDraftState[])(
+    "a draft the Mailing Agent reports as %s is never labelled stale, whatever its digest",
+    (state) => {
+      for (const a of [approved(), failedRelease(), action({ state: "submitted", approved_content_sha256: DIGEST }), action({ state: "dispatching", approved_content_sha256: DIGEST })]) {
+        const d = draft(state, { content_sha256: OTHER });
+        expect(isApprovalStale(a, d, false)).toBe(false);
+        expect(view(a, d).stage).not.toBe("approval_stale");
+      }
+    }
+  );
+
+  it("released and cancelled actions are never stale, even beside a held draft with another digest", () => {
+    for (const state of ["submitted", "dispatching", "cancelled"] as OutreachStateValue[]) {
+      const a = action({ state, approved_content_sha256: DIGEST });
+      expect(isApprovalStale(a, held({ content_sha256: OTHER }), false)).toBe(false);
+      expect(view(a, held({ content_sha256: OTHER })).stage).not.toBe("approval_stale");
+    }
+  });
+
+  it("a reply still awaiting approval, a legacy reply and a non-action are not stale", () => {
+    expect(view(action(), held({ content_sha256: OTHER })).stage).toBe("review");
+    const legacy = action({ state: "approved", reply_draft_requested_at: null, approved_content_sha256: DIGEST });
+    expect(view(legacy, held({ content_sha256: OTHER })).stage).toBe("legacy");
+    expect(isApprovalStale(null, held(), false)).toBe(false);
+    expect(isApprovalStale(undefined, held(), false)).toBe(false);
   });
 });

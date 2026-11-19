@@ -35,6 +35,7 @@ export type ReplyStage =
   | "review" //             complete draft on screen, awaiting the user's approval
   | "generation_failed" //  no draft will ever exist for this reply
   | "approved" //           approved; ready to send (nothing sent yet)
+  | "approval_stale" //     approved, but the held draft no longer matches what was approved: cannot be sent
   | "release_failed" //     send was attempted but not completed; safe to retry
   | "queued" //             released, waiting for the Mailing Agent to send
   | "sending"
@@ -53,6 +54,7 @@ export const REPLY_STAGE_LABEL: Record<ReplyStage, string> = {
   review: "Draft ready for review",
   generation_failed: "Generation failed",
   approved: "Approved",
+  approval_stale: "Draft changed since approval",
   release_failed: "Not sent yet",
   queued: "Ready to send",
   sending: "Sending",
@@ -127,6 +129,32 @@ export function isLegacyReplyAction(action: OutreachAction | null | undefined): 
   );
 }
 
+/** The approval on file no longer matches the draft the Mailing Agent is holding.
+ *
+ * True only when ALL of these hold -- each one is evidence, and without it nothing is claimed:
+ *  - the action says the draft was approved and is not yet released (`approved` / `dispatch_failed`);
+ *  - the action carries a stored approved digest (a non-empty string);
+ *  - the draft was read successfully (`draftError` is false) and is still held (`awaiting_approval`);
+ *  - that held draft's digest is missing/empty, or differs from the approved digest.
+ *
+ * Deliberately NOT stale (the backend release gate stays the authority in each case): an action with no stored
+ * approved digest, a draft that is not loaded or whose read failed, any released state, and matching digests.
+ * Plain string equality is exact for the Mailing Agent's digests (64 lowercase hex); where it could disagree
+ * with the server (two identical but malformed values) the server is the stricter side and still refuses.
+ * This changes only what the UI says and offers -- never what the server permits. */
+export function isApprovalStale(
+  action: OutreachAction | null | undefined,
+  draft: ReplyDraft | undefined,
+  draftError: boolean
+): boolean {
+  if (!action || (action.state !== "approved" && action.state !== "dispatch_failed")) return false;
+  const approved = action.approved_content_sha256;
+  if (typeof approved !== "string" || approved.length === 0) return false;
+  if (draftError || !draft || draft.state !== "awaiting_approval") return false;
+  const held = draft.content_sha256;
+  return typeof held !== "string" || held.length === 0 || held !== approved;
+}
+
 function stageAfterRelease(draft: ReplyDraft | undefined): ReplyStage {
   switch (draft?.state) {
     case "sent":
@@ -162,12 +190,14 @@ export function deriveReplyStage({ action, draft, draftError, inFlight }: ReplyV
     }
     case "approved":
       if (draft && draft.state !== "awaiting_approval" && draft.state !== "generating") return stageAfterRelease(draft);
+      if (isApprovalStale(action, draft, draftError)) return "approval_stale";
       return "approved";
     case "dispatching":
       return "sending";
     case "dispatch_failed":
       // A release may have succeeded even though the response was lost; trust the Mailing Agent's own state.
       if (draft && draft.state !== "awaiting_approval" && draft.state !== "generating") return stageAfterRelease(draft);
+      if (isApprovalStale(action, draft, draftError)) return "approval_stale";
       return "release_failed";
     case "submitted":
       return stageAfterRelease(draft);
@@ -180,7 +210,7 @@ export function deriveReplyView(input: ReplyViewInput): ReplyView {
   const { action, draft, inFlight } = input;
   const stage = deriveReplyStage(input);
   const busy = anyInFlight(inFlight);
-  const contentStages: ReplyStage[] = ["review", "approved", "release_failed", "queued", "sending", "sent", "failed", "unknown"];
+  const contentStages: ReplyStage[] = ["review", "approved", "approval_stale", "release_failed", "queued", "sending", "sent", "failed", "unknown"];
 
   const canGenerate = !busy && (stage === "idle" || stage === "created");
 
@@ -193,7 +223,8 @@ export function deriveReplyView(input: ReplyViewInput): ReplyView {
     hasCompleteDraft(draft);
 
   // Send: only after approval SUCCEEDED -- the approved digest is stored on the action -- and nothing is
-  // already in flight, sending, sent, unknown or cancelled.
+  // already in flight, sending, sent, unknown or cancelled. `approval_stale` is neither "approved" nor
+  // "release_failed", so a draft that no longer matches its approval can never be sent from here.
   const canSend =
     !busy &&
     (stage === "approved" || stage === "release_failed") &&

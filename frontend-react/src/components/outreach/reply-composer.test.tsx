@@ -392,3 +392,131 @@ describe("a failed start", () => {
     expect(api.dispatch).not.toHaveBeenCalled();
   });
 });
+
+describe("an approval that no longer matches the held draft", () => {
+  const OTHER = "d".repeat(64);
+  const approvedAction = (over: Partial<OutreachAction> = {}) =>
+    action({ state: "approved", approved_content_sha256: DIGEST, approved_draft_version: 1, ...over });
+  const failedRelease = (over: Partial<OutreachAction> = {}) =>
+    action({ state: "dispatch_failed", approved_content_sha256: DIGEST, dispatch_attempts: 1, ...over });
+  const STALE_COPY = /different from the version that was approved, so it can.t be sent under that approval/i;
+  const APPROVED_CAPTION = /This is the message that was approved/i;
+
+  it("approved + changed digest: explains it, offers no Approve / Send / retry, captions the text as the held draft", async () => {
+    api.getReplyDraft.mockResolvedValue(draft("awaiting_approval", { content_sha256: OTHER }));
+    const { container } = renderComposer({ replyAction: approvedAction() });
+    await screen.findByText("Draft changed since approval");
+    expect(screen.getByText(STALE_COPY)).toBeInTheDocument();
+    expect(screen.getByText(/Nothing was sent/i)).toBeInTheDocument();
+    expect(screen.getByText(/current held draft\. It is not the version that was approved/i)).toBeInTheDocument();
+    expect(screen.queryByText(APPROVED_CAPTION)).toBeNull();
+    expect(screen.queryByText("Approved")).toBeNull();
+    expect(screen.queryByText(/Nothing has been sent yet\. Send it when you are ready/i)).toBeNull();
+    expect(btn(/send approved reply/i)).toBeNull();
+    expect(btn(/try sending again/i)).toBeNull();
+    expect(btn(/approve exact draft/i)).toBeNull();
+    expect(btn(/generate reply draft/i)).toBeNull();
+    expect(btn(/cancel reply/i)).toBeEnabled();
+    // the current held text is shown (plain text), but neither digest is
+    expect(screen.getByText(/Here is the exact reply text\./)).toBeInTheDocument();
+    expect(container.textContent).not.toContain(DIGEST);
+    expect(container.textContent).not.toContain(OTHER);
+  });
+
+  it("dispatch_failed + changed digest: no 'Try sending again', and no promise that the approved message will be used", async () => {
+    api.getReplyDraft.mockResolvedValue(draft("awaiting_approval", { content_sha256: OTHER }));
+    renderComposer({ replyAction: failedRelease() });
+    await screen.findByText("Draft changed since approval");
+    expect(screen.getByText(STALE_COPY)).toBeInTheDocument();
+    expect(screen.queryByText("Not sent yet")).toBeNull();
+    expect(screen.queryByText(/same approved message will be used/i)).toBeNull();
+    expect(screen.queryByText(APPROVED_CAPTION)).toBeNull();
+    expect(btn(/try sending again/i)).toBeNull();
+    expect(btn(/send approved reply/i)).toBeNull();
+    expect(btn(/approve exact draft/i)).toBeNull();
+    expect(btn(/cancel reply/i)).toBeEnabled();
+  });
+
+  it.each([["null", null], ["empty", ""]])(
+    "an absent held-draft digest (%s) still explains, and shows no draft text",
+    async (_n, missing) => {
+      api.getReplyDraft.mockResolvedValue(draft("awaiting_approval", { content_sha256: missing }));
+      renderComposer({ replyAction: approvedAction() });
+      await screen.findByText("Draft changed since approval");
+      expect(screen.getByText(STALE_COPY)).toBeInTheDocument();
+      expect(screen.queryByText(/Here is the exact reply text\./)).toBeNull();
+      expect(screen.queryByText(/current held draft/i)).toBeNull();     // no draft text, so no caption either
+      expect(screen.queryByText(APPROVED_CAPTION)).toBeNull();
+      expect(btn(/send approved reply|try sending again|approve exact draft/i)).toBeNull();
+      expect(btn(/cancel reply/i)).toBeEnabled();
+    }
+  );
+
+  it("matching digest, approved: unchanged -- Send is offered and the draft is captioned as approved", async () => {
+    api.getReplyDraft.mockResolvedValue(draft("awaiting_approval"));
+    renderComposer({ replyAction: approvedAction() });
+    await screen.findByText("Approved");
+    expect(screen.queryByText("Draft changed since approval")).toBeNull();
+    expect(screen.queryByText(STALE_COPY)).toBeNull();
+    expect(screen.getByText(APPROVED_CAPTION)).toBeInTheDocument();
+    expect(btn(/send approved reply/i)).toBeEnabled();
+  });
+
+  it("a transient release failure with a matching digest still offers a retry of the same approved message", async () => {
+    api.getReplyDraft.mockResolvedValue(draft("awaiting_approval"));
+    renderComposer({ replyAction: failedRelease() });
+    await screen.findByText("Not sent yet");
+    expect(screen.getByText(/same approved message will be used/i)).toBeInTheDocument();
+    expect(screen.queryByText("Draft changed since approval")).toBeNull();
+    expect(btn(/try sending again/i)).toBeEnabled();
+  });
+
+  it("a stale reply can still be cancelled, and cancelling calls only cancel", async () => {
+    api.getReplyDraft.mockResolvedValue(draft("awaiting_approval", { content_sha256: OTHER }));
+    api.cancel.mockResolvedValue(action({ state: "cancelled" }));
+    renderComposer({ replyAction: approvedAction() });
+    await screen.findByText("Draft changed since approval");
+    await userEvent.click(btn(/cancel reply/i)!);
+    await waitFor(() => expect(api.cancel).toHaveBeenCalledTimes(1));
+    expect(api.cancel).toHaveBeenCalledWith(7);
+    expect(api.dispatch).not.toHaveBeenCalled();
+    expect(api.approveReply).not.toHaveBeenCalled();
+  });
+
+  it("an approval with no stored approved digest is unchanged: 'Approved' with a disabled Send, never 'stale'", async () => {
+    api.getReplyDraft.mockResolvedValue(draft("awaiting_approval", { content_sha256: OTHER }));
+    renderComposer({ replyAction: action({ state: "approved", approved_content_sha256: null }) });
+    await screen.findByText("Approved");
+    expect(screen.queryByText("Draft changed since approval")).toBeNull();
+    expect(btn(/send approved reply/i)).toBeDisabled();
+  });
+
+  it("a draft read that failed gives no verdict: the approved view is unchanged (the server gate stays the authority)", async () => {
+    api.getReplyDraft.mockRejectedValue(httpError(404, { detail: { error_code: "reply_draft_not_found", message: "x" } }));
+    renderComposer({ replyAction: approvedAction() });
+    await waitFor(() => expect(api.getReplyDraft).toHaveBeenCalled());
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.getByText("Approved")).toBeInTheDocument();
+    expect(screen.queryByText("Draft changed since approval")).toBeNull();
+    expect(btn(/send approved reply/i)).toBeEnabled();
+  });
+
+  it("an action whose draft has not loaded yet is not called stale", async () => {
+    api.getReplyDraft.mockImplementation(() => new Promise(() => {}));      // never resolves
+    renderComposer({ replyAction: approvedAction() });
+    expect(screen.getByText("Approved")).toBeInTheDocument();
+    expect(screen.queryByText("Draft changed since approval")).toBeNull();
+  });
+
+  it.each(["queued", "sending", "sent", "failed", "unknown", "cancelled"] as ReplyDraftState[])(
+    "a released message (%s) is never labelled stale, even if its digest differs",
+    async (state) => {
+      api.getReplyDraft.mockResolvedValue(draft(state, { content_sha256: OTHER }));
+      renderComposer({ replyAction: action({ state: "submitted", approved_content_sha256: DIGEST, submitted_at: "2026-10-31T10:05:00Z" }) });
+      await waitFor(() => expect(api.getReplyDraft).toHaveBeenCalled());
+      await screen.findByText(/Ready to send|Sending|Sent \(SMTP accepted\)|Failed|Delivery unconfirmed|Cancelled/);
+      expect(screen.queryByText("Draft changed since approval")).toBeNull();
+      expect(screen.queryByText(STALE_COPY)).toBeNull();
+    }
+  );
+});

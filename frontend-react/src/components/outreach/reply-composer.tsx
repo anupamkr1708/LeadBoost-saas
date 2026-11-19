@@ -40,6 +40,7 @@ const STAGE_STYLE: Record<ReplyStage, { className: string; Icon: typeof Clock }>
   review: { className: "text-amber-300", Icon: ShieldCheck },
   generation_failed: { className: "text-rose-300", Icon: XCircle },
   approved: { className: "text-sky-300", Icon: CheckCircle2 },
+  approval_stale: { className: "text-amber-300", Icon: AlertTriangle },
   release_failed: { className: "text-rose-300", Icon: AlertTriangle },
   queued: { className: "text-sky-300", Icon: Clock },
   sending: { className: "text-sky-300", Icon: Loader2 },
@@ -266,7 +267,9 @@ export function ReplyComposer({
           <p className="text-xs text-muted-foreground">
             {view.stage === "review"
               ? "This is the exact message that will be sent if you approve it."
-              : "This is the message that was approved."}
+              : view.stage === "approval_stale"
+                ? "This is the current held draft. It is not the version that was approved."
+                : "This is the message that was approved."}
           </p>
           <p className="mt-2 break-words text-xs font-medium">{draft.subject}</p>
           <p className="mt-1.5 whitespace-pre-wrap break-words text-xs text-foreground/90">{draft.body}</p>
@@ -275,6 +278,12 @@ export function ReplyComposer({
 
       {view.stage === "approved" && (
         <p className="mt-2 text-xs text-muted-foreground">Approved. Nothing has been sent yet. Send it when you are ready.</p>
+      )}
+      {view.stage === "approval_stale" && (
+        <p className="mt-2 text-xs text-amber-300/90">
+          The stored draft is different from the version that was approved, so it can&apos;t be sent under that approval.
+          Nothing was sent. Cancel this reply to close it.
+        </p>
       )}
       {view.stage === "release_failed" && (
         <p className="mt-2 text-xs text-rose-300/90">
