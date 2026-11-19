@@ -53,8 +53,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # Runtime system packages: libpq5 (psycopg2-binary needs the client
 # library even though the wheel is prebuilt) and the Chromium runtime
 # dependencies Playwright needs to actually launch a browser.
+# libatomic1: the Node driver bundled with recent Playwright wheels needs it just to start, i.e. before
+# `playwright install --with-deps` below can install anything itself (the builder stage only has it via gcc).
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libpq5 \
+        libatomic1 \
         curl \
     && rm -rf /var/lib/apt/lists/*
 
