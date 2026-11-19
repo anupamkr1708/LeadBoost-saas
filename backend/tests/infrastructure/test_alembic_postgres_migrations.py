@@ -79,7 +79,8 @@ _P1_2_REVISION = "61258798a87a"
 _P1_3_REVISION = "1e7ab6ba0976"
 _P1_4_REVISION = "baee12037c73"
 _L1_REVISION = "c1a7e0d2b9f4"  # email_accounts <-> Mailer mailbox link
-_C94_REVISION = "d4b8f2a6c113"  # current head: outreach_actions.reply_to_message_reference
+_C94_REVISION = "d4b8f2a6c113"  # outreach_actions.reply_to_message_reference (parent of the head)
+_C95_REVISION = "e5c9a3b7d214"  # current head: managed-reply content-approval evidence on outreach_actions
 
 
 def _database_url_with_name(admin_url: str, db_name: str) -> str:
@@ -191,10 +192,10 @@ class TestFreshPostgresUpgrade:
         _run_alembic("upgrade", "head", database_url=disposable_db)
 
         current = _run_alembic("current", database_url=disposable_db)
-        assert _C94_REVISION in current.stdout
+        assert _C95_REVISION in current.stdout
 
         heads = _run_alembic("heads", database_url=disposable_db)
-        assert _C94_REVISION in heads.stdout
+        assert _C95_REVISION in heads.stdout
         assert heads.stdout.strip().count("\n") == 0  # exactly one head line
 
     def test_alembic_check_clean_after_fresh_upgrade(self, disposable_db):
@@ -271,7 +272,7 @@ class TestExistingSchemaAdoption:
         assert stamp_result.returncode == 0, stamp_result.stderr
 
         current = _run_alembic("current", database_url=disposable_db)
-        assert _C94_REVISION in current.stdout
+        assert _C95_REVISION in current.stdout
 
         upgrade_result = _run_alembic("upgrade", "head", database_url=disposable_db)
         assert upgrade_result.returncode == 0
@@ -504,7 +505,7 @@ class TestC94ReplyParentMigration:
         assert _run_alembic("upgrade", _L1_REVISION, database_url=disposable_db).returncode == 0
         before = self._cols(disposable_db)
         assert "reply_to_message_reference" not in before
-        assert _run_alembic("upgrade", "head", database_url=disposable_db).returncode == 0
+        assert _run_alembic("upgrade", _C94_REVISION, database_url=disposable_db).returncode == 0
         after = self._cols(disposable_db)
         assert set(after) - set(before) == {"reply_to_message_reference"}
         assert set(before) - set(after) == set()
@@ -514,12 +515,12 @@ class TestC94ReplyParentMigration:
         assert "uq_outreach_actions_org_idempotency_key" in constraints
 
     def test_downgrade_drops_only_that_column_and_reapplies(self, disposable_db):
-        assert _run_alembic("upgrade", "head", database_url=disposable_db).returncode == 0
+        assert _run_alembic("upgrade", _C94_REVISION, database_url=disposable_db).returncode == 0
         with_col = self._cols(disposable_db)
         assert _run_alembic("downgrade", "-1", database_url=disposable_db).returncode == 0
         without = self._cols(disposable_db)
         assert set(with_col) - set(without) == {"reply_to_message_reference"}
-        assert _run_alembic("upgrade", "head", database_url=disposable_db).returncode == 0
+        assert _run_alembic("upgrade", _C94_REVISION, database_url=disposable_db).returncode == 0
         assert self._cols(disposable_db) == with_col
 
     def test_upgrade_body_has_no_drops(self):
@@ -527,3 +528,99 @@ class TestC94ReplyParentMigration:
                   / "20261028_1000_d4b8f2a6c113_c9_4_outreach_action_reply_parent.py").read_text()
         body = source[source.index("def upgrade()"):source.index("def downgrade()")]
         assert "drop_" not in body and "DROP" not in body and "add_column" in body
+
+
+class TestC95ReplyContentApprovalMigration:
+    """C9.5 is three additive nullable columns on outreach_actions. Nothing else moves; every existing row keeps
+    NULL for all three (ordinary outreach and pre-feature replies behave exactly as before); the idempotency
+    constraint is untouched; it downgrades to exactly the C9.4 shape and re-applies identically."""
+
+    NEW = {"reply_draft_requested_at", "approved_content_sha256", "approved_draft_version"}
+    # Valid values for the columns that carry CHECK constraints (same as the L1 tests above use).
+    ACCOUNT = dict(provider="'smtp'", email_address="'a@acme.test'", smtp_host="'smtp.acme.test'", smtp_port=587,
+                   security_mode="'starttls'", credential_type="'smtp_password'", verification_status="'verified'",
+                   is_active="true")
+
+    _q = TestC94ReplyParentMigration._q
+    _cols = TestC94ReplyParentMigration._cols
+
+    def _insert_minimal(self, url, table, **overrides):
+        """A valid row built from the table's own NOT NULL, no-default columns, so this test does not hard-code a
+        schema that can drift. Returns the new id."""
+        info = self._q(url, (
+            "SELECT column_name, data_type FROM information_schema.columns WHERE table_name='%s' "
+            "AND is_nullable='NO' AND column_default IS NULL" % table))
+        values = dict(overrides)
+        for name, dtype in info:
+            if name in values:
+                continue
+            values[name] = ("'x'" if dtype in ("character varying", "text") else
+                            "false" if dtype == "boolean" else
+                            "now()" if dtype.startswith("timestamp") else
+                            "0" if dtype in ("integer", "bigint", "double precision") else "NULL")
+        cols = ", ".join(values)
+        vals = ", ".join(str(v) for v in values.values())
+        return self._q(url, f"INSERT INTO {table} ({cols}) VALUES ({vals}) RETURNING id")[0][0]
+
+    def test_upgrade_adds_exactly_three_nullable_columns_and_keeps_the_constraint(self, disposable_db):
+        assert _run_alembic("upgrade", _C94_REVISION, database_url=disposable_db).returncode == 0
+        before = self._cols(disposable_db)
+        assert not self.NEW & set(before)
+        assert _run_alembic("upgrade", "head", database_url=disposable_db).returncode == 0
+        after = self._cols(disposable_db)
+        assert set(after) - set(before) == self.NEW and set(before) - set(after) == set()
+        assert all(after[c][0] == "YES" for c in self.NEW)                       # all nullable
+        assert after["approved_content_sha256"][1] == "character varying"
+        assert after["approved_draft_version"][1] == "integer"
+        assert after["reply_draft_requested_at"][1] == "timestamp with time zone"
+        constraints = {r[0] for r in self._q(
+            disposable_db, "SELECT conname FROM pg_constraint WHERE conrelid = 'outreach_actions'::regclass")}
+        assert "uq_outreach_actions_org_idempotency_key" in constraints
+
+    def test_existing_actions_survive_with_null_evidence(self, disposable_db):
+        """A real pre-feature row -- both an ordinary action and a C9.4 reply -- keeps every value and gets NULLs."""
+        assert _run_alembic("upgrade", _C94_REVISION, database_url=disposable_db).returncode == 0
+        org = self._q(disposable_db, "INSERT INTO organizations (name) VALUES ('Acme') RETURNING id")[0][0]
+        acct = self._insert_minimal(disposable_db, "email_accounts", **self.ACCOUNT, organization_id=org)
+        uid = self._insert_minimal(disposable_db, "users", organization_id=org)
+        lead = self._insert_minimal(disposable_db, "leads", organization_id=org, owner_id=uid)
+        ordinary = self._insert_minimal(
+            disposable_db, "outreach_actions", organization_id=org, lead_id=lead, email_account_id=acct,
+            idempotency_key="'ordinary-1'", body="'original body'")
+        reply = self._insert_minimal(
+            disposable_db, "outreach_actions", organization_id=org, lead_id=lead, email_account_id=acct,
+            idempotency_key="'reply:abc'", body="'original body'",
+            reply_to_message_reference="'0123456789abcdef0123456789abcdef'")
+
+        assert _run_alembic("upgrade", "head", database_url=disposable_db).returncode == 0
+        rows = self._q(disposable_db, (
+            "SELECT id, idempotency_key, body, reply_to_message_reference, reply_draft_requested_at, "
+            "approved_content_sha256, approved_draft_version FROM outreach_actions ORDER BY id"))
+        assert rows == [
+            (ordinary, "ordinary-1", "original body", None, None, None, None),
+            (reply, "reply:abc", "original body", "0123456789abcdef0123456789abcdef", None, None, None),
+        ]
+
+    def test_downgrade_restores_exactly_the_c94_shape_and_keeps_rows(self, disposable_db):
+        assert _run_alembic("upgrade", _C94_REVISION, database_url=disposable_db).returncode == 0
+        c94_shape = self._cols(disposable_db)
+        org = self._q(disposable_db, "INSERT INTO organizations (name) VALUES ('Acme') RETURNING id")[0][0]
+        acct = self._insert_minimal(disposable_db, "email_accounts", **self.ACCOUNT, organization_id=org)
+        uid = self._insert_minimal(disposable_db, "users", organization_id=org)
+        lead = self._insert_minimal(disposable_db, "leads", organization_id=org, owner_id=uid)
+        self._insert_minimal(disposable_db, "outreach_actions", organization_id=org, lead_id=lead,
+                             email_account_id=acct, idempotency_key="'k1'")
+        assert _run_alembic("upgrade", "head", database_url=disposable_db).returncode == 0
+        with_cols = self._cols(disposable_db)
+        assert _run_alembic("downgrade", "-1", database_url=disposable_db).returncode == 0
+        assert self._cols(disposable_db) == c94_shape
+        assert self._q(disposable_db, "SELECT count(*) FROM outreach_actions") == [(1,)]
+        assert _run_alembic("upgrade", "head", database_url=disposable_db).returncode == 0
+        assert self._cols(disposable_db) == with_cols
+
+    def test_revision_chain_and_body(self):
+        source = (_BACKEND_ROOT / "alembic" / "versions"
+                  / "20261031_1000_e5c9a3b7d214_c9_5_reply_content_approval.py").read_text()
+        assert f"down_revision: Union[str, Sequence[str], None] = '{_C94_REVISION}'" in source
+        body = source[source.index("def upgrade()"):source.index("def downgrade()")]
+        assert "drop_" not in body and "DROP" not in body and body.count("add_column") == 3

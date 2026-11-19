@@ -21,12 +21,13 @@ supplied in the request body/path instead.
 
 from typing import Any, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
 from core.domain.models.user import User
 from core.domain.schemas.outreach_action import OutreachAction as OutreachActionSchema, OutreachActionCreate
 from core.domain.schemas.outreach_mailer_state import OutreachMailerState
+from core.domain.schemas.outreach_reply_draft import ReplyApproveRequest, ReplyDraft
 from core.domain.schemas.outreach_policy import OutreachPolicy as OutreachPolicySchema, OutreachPolicyUpdate
 from core.infrastructure.auth.security import get_current_user
 from core.infrastructure.database import get_db
@@ -64,6 +65,14 @@ _ERROR_STATUS = {
     OutreachErrorCode.REPLY_IDEMPOTENCY_KEY_NOT_ALLOWED: status.HTTP_422_UNPROCESSABLE_ENTITY,
     # L1: configuration conflict -- more than one eligible sender; never guessed.
     OutreachErrorCode.MULTIPLE_ACTIVE_SENDERS: status.HTTP_409_CONFLICT,
+    # C9.5 managed-reply content approval.
+    OutreachErrorCode.NOT_A_REPLY: status.HTTP_409_CONFLICT,
+    OutreachErrorCode.REPLY_DRAFT_NOT_READY: status.HTTP_409_CONFLICT,
+    OutreachErrorCode.REPLY_DRAFT_STALE: status.HTTP_409_CONFLICT,
+    OutreachErrorCode.REPLY_APPROVAL_MISSING: status.HTTP_409_CONFLICT,
+    OutreachErrorCode.REPLY_CONTENT_HASH_REQUIRED: status.HTTP_422_UNPROCESSABLE_ENTITY,
+    OutreachErrorCode.REPLY_DRAFT_UNAVAILABLE: status.HTTP_502_BAD_GATEWAY,
+    OutreachErrorCode.REPLY_DRAFT_TOO_LARGE: status.HTTP_422_UNPROCESSABLE_ENTITY,
 }
 
 
@@ -155,12 +164,26 @@ async def read_outreach_mailer_state_endpoint(
 @router.post("/outreach-actions/{action_id}/approve", response_model=OutreachActionSchema)
 async def approve_outreach_action_endpoint(
     action_id: int,
+    payload: Optional[ReplyApproveRequest] = Body(default=None),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> Any:
     """Manual approval: PENDING_REVIEW -> APPROVED. Re-validates sender
-    eligibility at approval time (see outreach_service.approve_action)."""
+    eligibility at approval time (see outreach_service.approve_action).
+
+    A REPLY (C9.5) is approved against the exact draft the user reviewed: the body carries that draft's
+    `content_sha256`, LeadBoost re-fetches the Mailer's current draft server-to-server and approves only if the
+    digests match (see outreach_service.approve_reply_action). An ordinary action takes no body and is unchanged."""
     try:
+        existing = get_outreach_action(db, current_user.organization_id, action_id)
+        if existing is not None and existing.reply_to_message_reference:
+            return await outreach_service.approve_reply_action(
+                db,
+                organization_id=current_user.organization_id,
+                action_id=action_id,
+                approved_by_user_id=current_user.id,
+                content_sha256=payload.content_sha256 if payload else "",
+            )
         return outreach_service.approve_action(
             db,
             organization_id=current_user.organization_id,
@@ -181,11 +204,70 @@ async def cancel_outreach_action_endpoint(
     valid once SUBMITTED, and not valid while a dispatch is actually in
     flight (DISPATCHING) -- see OutreachState.CANCELLABLE_FROM."""
     try:
+        existing = get_outreach_action(db, current_user.organization_id, action_id)
+        if existing is not None and existing.reply_to_message_reference:
+            # C9.5: also revokes the Mailer's held draft (and, after a failed release, asks the Mailer FIRST).
+            return await outreach_service.cancel_reply_action(
+                db, organization_id=current_user.organization_id, action_id=action_id, reason="Cancelled by user."
+            )
         return outreach_service.cancel_action(
             db, organization_id=current_user.organization_id, action_id=action_id, reason="Cancelled by user."
         )
     except OutreachError as exc:
         _raise_for(exc)
+
+
+@router.post("/outreach-actions/{action_id}/reply-draft", response_model=ReplyDraft)
+async def start_reply_draft_endpoint(
+    action_id: int,
+    response: Response,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Any:
+    """Ask the Mailer to GENERATE the draft for a reply action (C9.5). Sends nothing: the Mailer holds every managed
+    reply, so generating before approval cannot make a message sendable. Idempotent -- repeating it (e.g. after a
+    timeout) replays the Mailer's existing operation rather than creating another. Returns the draft state."""
+    try:
+        await outreach_service.start_reply_draft(
+            db, organization_id=current_user.organization_id, action_id=action_id
+        )
+    except OutreachError as exc:
+        _raise_for(exc)
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        return await outreach_service.get_reply_draft(
+            db, organization_id=current_user.organization_id, action_id=action_id
+        )
+    except OutreachError as exc:
+        # The request WAS accepted. The only read-back outcome that means "still being written" is the Mailer not having
+        # a draft to show yet. Anything else is a real condition and is reported as such -- an outage, a malformed
+        # Mailer response, a draft too large to review, a rejected key -- never disguised as progress. Nothing is lost
+        # by reporting it: the request is recorded, and repeating it (or reading the draft) is idempotent.
+        if exc.error_code == OutreachErrorCode.REPLY_DRAFT_NOT_READY:
+            return ReplyDraft(state="generating")
+        _raise_for(exc)
+
+
+@router.get("/outreach-actions/{action_id}/reply-draft", response_model=ReplyDraft)
+async def read_reply_draft_endpoint(
+    action_id: int,
+    response: Response,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Any:
+    """Read-only: the Mailer's persisted subject and body for this reply, fetched server-side (the browser never
+    talks to the Mailer). Mailer-side failures are a safe 502/409 with a closed error_code, never raw text."""
+    try:
+        draft = await outreach_service.get_reply_draft(
+            db, organization_id=current_user.organization_id, action_id=action_id
+        )
+    except OutreachError as exc:
+        _raise_for(exc)
+    response.headers["Cache-Control"] = "no-store"  # private message content
+    return ReplyDraft(
+        state=draft.state, subject=draft.subject, body=draft.body, content_sha256=draft.content_sha256,
+        draft_version=draft.draft_version, updated_at=draft.updated_at,
+    )
 
 
 @router.post("/outreach-actions/{action_id}/dispatch", response_model=OutreachActionSchema)

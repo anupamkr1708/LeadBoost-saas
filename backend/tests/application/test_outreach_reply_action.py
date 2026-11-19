@@ -206,18 +206,39 @@ def test_malformed_reference_is_rejected(client, mailer, monkeypatch, ref):
 
 
 def test_dispatch_sends_in_reply_to_only_after_approval(client, mailer, monkeypatch):
+    """C9.4 -> C9.5. The reply reference still reaches the Mailer, and nothing is released before approval -- but
+    approval is now of the EXACT generated draft (by digest), and dispatch RELEASES that draft instead of asking the
+    Mailer to generate one. The full lifecycle is in test_outreach_reply_content_approval.py; this keeps the
+    original guarantees on the C9.4 file."""
+    import json
     h, org, tenant, lead, acc = _setup(client, mailer, monkeypatch, "r6")
     aid = _reply(client, h, lead, acc, REF).json()["id"]
     assert _dispatch(client, h, aid).status_code in (400, 409)        # not approved: refused
     assert mailer.calls_to("POST", DISPATCH_PATH) == []
-    assert client.post(f"/api/v2/outreach-actions/{aid}/approve", headers=h).status_code == 200
-    r = _dispatch(client, h, aid)
-    assert r.status_code == 200 and r.json()["state"] == "submitted"
-    (call,) = mailer.calls_to("POST", DISPATCH_PATH)
-    import json
+    # Approving a reply with no reviewed draft (no digest) is refused: the old "approve, then generate" path is gone.
+    assert client.post(f"/api/v2/outreach-actions/{aid}/approve", headers=h).status_code == 422
+    assert mailer.calls_to("POST", DISPATCH_PATH) == []
+
+    assert client.post(f"/api/v2/outreach-actions/{aid}/reply-draft", headers=h).status_code == 200
+    (call,) = mailer.calls_to("POST", DISPATCH_PATH)                 # generation happens at draft start, pre-approval
     body = json.loads(call.body) if isinstance(call.body, (str, bytes)) else call.body
     assert body["in_reply_to"] == {"message_reference": REF}
     assert body["idempotency_key"].startswith("reply:")
+    s = SessionLocal()
+    try:
+        key = s.get(OutreachAction, aid).idempotency_key
+    finally:
+        s.close()
+    digest = mailer.generate_draft(tenant, key)
+    assert client.post(f"/api/v2/outreach-actions/{aid}/approve", headers=h,
+                       json={"content_sha256": digest}).status_code == 200
+    assert mailer.calls_to("POST", "/integrations/leadboost/reply-drafts/") == []   # approval releases nothing
+
+    r = _dispatch(client, h, aid)
+    assert r.status_code == 200 and r.json()["state"] == "submitted"
+    assert len(mailer.calls_to("POST", DISPATCH_PATH)) == 1, "dispatch must not submit a second generation request"
+    (release,) = mailer.calls_to("POST", "/integrations/leadboost/reply-drafts/")
+    assert release.path.endswith("/release") and release.body == {"content_sha256": digest}
 
 
 def test_plain_action_request_has_no_in_reply_to(client, mailer, monkeypatch):

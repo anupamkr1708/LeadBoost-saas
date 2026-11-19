@@ -8,7 +8,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "next": "14.2.35",
@@ -51,6 +52,11 @@
     "tailwindcss": "3.4.6",
     "tailwindcss-animate": "1.0.7",
     "eslint": "8.57.0",
-    "eslint-config-next": "14.2.5"
+    "eslint-config-next": "14.2.5",
+    "vitest": "2.1.9",
+    "jsdom": "25.0.1",
+    "@testing-library/react": "16.1.0",
+    "@testing-library/user-event": "14.5.2",
+    "@testing-library/jest-dom": "6.6.3"
   }
 }

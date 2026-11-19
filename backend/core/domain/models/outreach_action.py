@@ -188,6 +188,16 @@ class OutreachAction(Base):
     # like the rest of the snapshot; NULL for ordinary outreach.
     reply_to_message_reference = Column(String, nullable=True)
 
+    # --- Managed-reply content approval (C9.5). NULL for ordinary outreach and for every pre-existing row. ---
+    # When the Mailer accepted the request to GENERATE the reply draft. Generation happens before approval and
+    # sends nothing, so this is not a submission timestamp.
+    reply_draft_requested_at = Column(DateTime(timezone=True), nullable=True)
+    # The Mailer-issued digest of the exact subject+body the user approved (opaque here; the Mailer re-verifies
+    # it on release and again immediately before SMTP) and the draft version it belongs to. Written in the SAME
+    # atomic UPDATE that moves the action to APPROVED, so approval and its evidence cannot diverge.
+    approved_content_sha256 = Column(String(64), nullable=True)
+    approved_draft_version = Column(Integer, nullable=True)
+
     # Free-text, safe explanation of the current state (e.g. "automatic
     # policy requires approval", "daily send limit reached", "cancelled by
     # user") -- never raw exception/provider text. See brief #24.

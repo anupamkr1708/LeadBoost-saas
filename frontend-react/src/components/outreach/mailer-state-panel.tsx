@@ -1,7 +1,8 @@
 "use client";
 
-import { AlertTriangle, CheckCircle2, Clock, HelpCircle, Loader2, RotateCcw, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Clock, CornerUpLeft, HelpCircle, Loader2, RotateCcw, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { isValidMessageReference } from "@/components/outreach/reply-state";
 import { useOutreachMailerState } from "@/features/outreach/hooks";
 import { formatDateTime } from "@/lib/utils";
 import type { MailerConversationMessage, MailerDeliveryState, OutreachStateValue } from "@/types/api";
@@ -9,7 +10,10 @@ import type { MailerConversationMessage, MailerDeliveryState, OutreachStateValue
 // C9.3: a READ-ONLY view of what the Mailing Agent reports for one outreach action: its
 // authoritative delivery state and the actual conversation with the recipient. It shows
 // next to -- and never replaces or "corrects" -- the action's own LeadBoost state, and it
-// has no controls that change anything (the only button re-reads).
+// has no controls that change anything (the only button re-reads). The one addition (C9.5) is an
+// optional `onReply` callback: when given, an INBOUND message that carries a valid opaque reference
+// shows a Reply button that merely reports which message was chosen. The panel itself still holds no
+// mutation, no draft and no reply state -- that lives in the separate ReplyComposer.
 //
 // SECURITY: every message subject/body is third-party-controlled text (inbound mail is
 // untrusted). It is rendered ONLY as React text nodes -- never as HTML -- so it can't
@@ -43,8 +47,17 @@ function DeliveryLine({ state, updatedAt }: { state: MailerDeliveryState; update
   );
 }
 
-function Message({ message }: { message: MailerConversationMessage }) {
+function Message({
+  message,
+  onReply,
+}: {
+  message: MailerConversationMessage;
+  onReply?: (message: MailerConversationMessage) => void;
+}) {
   const outbound = message.direction === "outbound";
+  // Reply is offered only for an inbound message with a well-formed reference; never for an outbound
+  // message, and never when the reference is absent or malformed.
+  const canReply = !!onReply && !outbound && isValidMessageReference(message.message_reference);
   return (
     <li className={`rounded-lg border px-3 py-2 ${outbound ? "border-white/10 bg-white/5" : "border-sky-500/20 bg-sky-500/5"}`}>
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
@@ -58,6 +71,13 @@ function Message({ message }: { message: MailerConversationMessage }) {
       {/* plain text only: a React text node, with line breaks preserved by CSS */}
       <p className="mt-1 whitespace-pre-wrap break-words text-xs text-muted-foreground">{message.body}</p>
       {message.body_truncated && <p className="mt-1 text-xs italic text-muted-foreground">Message shortened.</p>}
+      {canReply && (
+        <div className="mt-2">
+          <Button variant="secondary" size="sm" onClick={() => onReply?.(message)}>
+            <CornerUpLeft className="h-3.5 w-3.5" /> Reply
+          </Button>
+        </div>
+      )}
     </li>
   );
 }
@@ -65,9 +85,12 @@ function Message({ message }: { message: MailerConversationMessage }) {
 export function MailerStatePanel({
   actionId,
   leadboostState,
+  onReply,
 }: {
   actionId: number;
   leadboostState: OutreachStateValue;
+  /** C9.5: optional. Reports which inbound message the user chose to answer; the panel does nothing else with it. */
+  onReply?: (message: MailerConversationMessage) => void;
 }) {
   const { data, isLoading, isError, refetch, isFetching } = useOutreachMailerState(actionId);
 
@@ -134,7 +157,7 @@ export function MailerStatePanel({
             </p>
             <ul className="space-y-2">
               {m.messages.map((message, i) => (
-                <Message key={`${message.direction}-${message.created_at ?? "x"}-${i}`} message={message} />
+                <Message key={`${message.direction}-${message.created_at ?? "x"}-${i}`} message={message} onReply={onReply} />
               ))}
             </ul>
           </div>

@@ -21,6 +21,13 @@ E2E):
     {action, messages, has_more} for the CALLER'S dispatch only (404 for unknown or
     foreign keys, indistinguishable); the key may contain '/', so the whole segment
     between the fixed prefix and "/conversation" is the key
+  * (C9.5) a request carrying `in_reply_to` is a MANAGED REPLY: it is held, never sent, until released. Script the
+    Mailer's side with generate_draft / fail_generation / mutate_draft. GET/POST /integrations/leadboost/reply-drafts/
+    {key}[/release|/cancel] follow the real Mailer's contract (statuses and `detail` codes included): a foreign or
+    unknown key is 404; release re-computes the digest from the CURRENT stored content and is idempotent for the
+    same digest; cancel is refused once released. The digest below is a stand-in with the real algorithm's
+    definition (canonical JSON of {"body","subject"} -> SHA-256); LeadBoost treats it as opaque, and the
+    cross-service E2E checks it against the REAL Mailer.
   * secrets are stored but never returned
 
 Fault injection: fail_next / timeout_next / connect_error_next / lose_response_next,
@@ -42,6 +49,7 @@ REAL_ASYNC_CLIENT = httpx.AsyncClient  # captured before any test patches it
 
 MAILBOX_FIELDS = {"email_address", "smtp_host", "smtp_port", "smtp_use_tls", "smtp_username", "smtp_password"}
 CONVERSATION_PREFIX = "/integrations/leadboost/outreach-actions/"
+DRAFT_PREFIX = "/integrations/leadboost/reply-drafts/"
 PATCH_FIELDS = {"status", "smtp_host", "smtp_port", "smtp_use_tls", "smtp_username", "smtp_password"}
 
 
@@ -60,6 +68,13 @@ class Call:
 
 # The real Mailer's reply contract: an inbound message's reference is an opaque 32-lowercase-hex token.
 REPLY_TOKEN_RE = re.compile(r"^[0-9a-f]{32}$")
+
+
+def fake_content_digest(subject: Optional[str], body: str) -> str:
+    """Same definition as the real Mailer's content digest (mailer_agent/mail/content_digest.py, version 1)."""
+    payload = json.dumps({"body": body, "subject": subject or ""}, sort_keys=True, separators=(",", ":"),
+                         ensure_ascii=False)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def fake_reply_token(tenant: str, idempotency_key: str, ordinal: int) -> str:
@@ -190,6 +205,7 @@ class FakeMailer:
             self.dispatches[key] = dict(
                 reference=ref, body=b, mailbox=self.active_boxes(t)[0]["public_reference"],
                 state="queued", messages=[], created_at="2026-01-01T12:00:00Z", updated_at="2026-01-01T12:00:00Z",
+                reply="in_reply_to" in b, draft=None, approved=None,
             )
             return httpx.Response(202, json={"accepted": True, "mailing_agent_reference": ref})
 
@@ -206,7 +222,84 @@ class FakeMailer:
                 return httpx.Response(404, json={"detail": "Outreach action not found"})
             return httpx.Response(200, json=self._conversation_out(rec, limit))
 
+        if call.path.startswith(DRAFT_PREFIX):
+            return self._route_draft(call, t, b)
+
         return httpx.Response(404, json={"detail": "no such route"})
+
+    # ---- C9.5 managed-reply drafts ---------------------------------------
+    def _draft_view(self, rec: dict) -> dict:
+        d, st = rec["draft"], rec["state"]
+        state = "generating" if st == "queued" and d is None else st
+        out = dict(state=state, subject=None, body=None, content_sha256=None, draft_version=None,
+                   updated_at=rec["updated_at"])
+        if d is not None:
+            out.update(subject=d["subject"], body=d["body"],
+                       content_sha256=fake_content_digest(d["subject"], d["body"]), draft_version=1)
+        return out
+
+    def _route_draft(self, call: Call, t: str, b) -> httpx.Response:
+        rest = call.path[len(DRAFT_PREFIX):]
+        action = None
+        for suffix in ("/release", "/cancel"):
+            if rest.endswith(suffix):
+                rest, action = rest[: -len(suffix)], suffix[1:]
+        rec = self.dispatches.get((t, rest))
+        if rec is None or not rec.get("reply"):
+            return httpx.Response(404, json={"detail": "Reply draft not found"})   # foreign == unknown == ordinary
+        if rec.get("legacy"):
+            return self._route_legacy_draft(call, action, rec)
+
+        if action is None and call.method == "GET":
+            return httpx.Response(200, json=self._draft_view(rec))
+
+        if action == "release" and call.method == "POST":
+            digest = b.get("content_sha256") if isinstance(b, dict) and set(b) == {"content_sha256"} else None
+            if not (isinstance(digest, str) and re.fullmatch(r"[0-9a-f]{64}", digest)):
+                return httpx.Response(422, json={"detail": "invalid content_sha256"})
+            if rec["state"] == "awaiting_approval":
+                d = rec["draft"]
+                if fake_content_digest(d["subject"], d["body"]) != digest:
+                    return httpx.Response(409, json={"detail": "draft_changed"})
+                rec["state"], rec["approved"] = "queued", digest
+                return httpx.Response(200, json=self._draft_view(rec))
+            if rec["approved"] is not None:
+                if rec["approved"] == digest:
+                    return httpx.Response(200, json=self._draft_view(rec))   # idempotent replay
+                return httpx.Response(409, json={"detail": "draft_already_released_with_different_content"})
+            detail = {"cancelled": "draft_cancelled", "failed": "draft_generation_failed"}.get(
+                rec["state"], "draft_not_ready")
+            return httpx.Response(409, json={"detail": detail})
+
+        if action == "cancel" and call.method == "POST":
+            if rec["state"] == "cancelled":
+                return httpx.Response(200, json=self._draft_view(rec))
+            if rec["state"] in ("awaiting_approval", "generating") or (rec["state"] == "queued" and rec["draft"] is None):
+                rec["state"] = "cancelled"
+                return httpx.Response(200, json=self._draft_view(rec))
+            return httpx.Response(409, json={"detail": "draft_already_released"})
+
+        return httpx.Response(404, json={"detail": "no such route"})
+
+    def _route_legacy_draft(self, call: Call, action: Optional[str], rec: dict) -> httpx.Response:
+        """A reply accepted by the PRE-approval Mailer (C9.4): the row exists, with the new flag false. The real
+        Mailer never answers 404 for it and never writes to it: read / release / cancel are all a 409
+        `legacy_reply_requires_reconciliation`, except that cancel is a 200 (no content) where the Mailer can PROVE
+        nothing was or can be sent (`failed`, or `cancelled` by an operator)."""
+        if action == "cancel" and call.method == "POST" and rec["state"] in ("failed", "cancelled"):
+            return httpx.Response(200, json=dict(state=rec["state"], subject=None, body=None, content_sha256=None,
+                                                 draft_version=None, updated_at=rec["updated_at"]))
+        if (action, call.method) in ((None, "GET"), ("release", "POST"), ("cancel", "POST")):
+            return httpx.Response(409, json={"detail": "legacy_reply_requires_reconciliation"})
+        return httpx.Response(404, json={"detail": "no such route"})
+
+    def make_legacy_dispatch(self, tenant: str, idempotency_key: str, state: str, *, message: bool = True) -> dict:
+        """Seed a C9.4-era Mailer operation under this key (as it exists after the Mailer's migration 013)."""
+        rec = dict(reference=f"dsp_legacy_{uuid.uuid4().hex[:6]}", body={}, mailbox=None, state=state, messages=[],
+                   created_at="2026-01-01T12:00:00Z", updated_at="2026-01-01T12:00:00Z", reply=True, legacy=True,
+                   has_message=message, draft=None, approved=None)
+        self.dispatches[(tenant, idempotency_key)] = rec
+        return rec
 
     def _out(self, ref: str) -> dict:
         m = self.mailboxes[ref]
@@ -217,19 +310,20 @@ class FakeMailer:
         msgs = rec["messages"]
         window = msgs[-limit:]
         out = []
+        public_state = {"awaiting_approval": "queued", "cancelled": "failed"}.get(rec["state"], rec["state"])
         for m in window:
             outbound = m["direction"] == "outbound"
             out.append(dict(
                 direction=m["direction"], message_type="initial_outreach" if outbound else None,
                 subject=m["subject"], body=m["body"], body_truncated=False, created_at=m["created_at"],
-                delivery_state=rec["state"] if outbound else None,
+                delivery_state=public_state if outbound else None,
                 mailing_agent_reference=rec["reference"] if outbound else None,
                 mailbox_reference=rec["mailbox"],
                 # like the real Mailer: always present; None on outbound, the stable opaque 32-hex token on inbound
                 message_reference=None if outbound else m["message_reference"],
             ))
         return {
-            "action": {"accepted": True, "state": rec["state"], "mailing_agent_reference": rec["reference"],
+            "action": {"accepted": True, "state": public_state, "mailing_agent_reference": rec["reference"],
                        "created_at": rec["created_at"], "updated_at": rec["updated_at"], "mailbox_reference": rec["mailbox"]},
             "messages": out,
             "has_more": len(msgs) > limit,
@@ -241,6 +335,28 @@ class FakeMailer:
 
     def set_dispatch_state(self, tenant: str, idempotency_key: str, state: str):
         self.dispatch_record(tenant, idempotency_key)["state"] = state
+
+    # ---- managed-reply scripting (C9.5): what the Mailer's worker would do ----
+    def generate_draft(self, tenant: str, idempotency_key: str, *, subject: str = "Re: Hello",
+                       body: str = "Hi Jane,\n\nThanks for getting back to me. Happy to share more.\n\nBest,\nSender"):
+        """The generation worker finished: the draft is persisted and HELD (awaiting_approval, not sendable)."""
+        rec = self.dispatch_record(tenant, idempotency_key)
+        assert rec.get("reply"), "only a managed reply is held"
+        rec["draft"] = dict(subject=subject, body=body)
+        rec["state"] = "awaiting_approval"
+        return fake_content_digest(subject, body)
+
+    def fail_generation(self, tenant: str, idempotency_key: str):
+        rec = self.dispatch_record(tenant, idempotency_key)
+        rec["draft"], rec["state"] = None, "failed"
+
+    def mutate_draft(self, tenant: str, idempotency_key: str, *, body: Optional[str] = None,
+                     subject: Optional[str] = None):
+        d = self.dispatch_record(tenant, idempotency_key)["draft"]
+        if body is not None:
+            d["body"] = body
+        if subject is not None:
+            d["subject"] = subject
 
     def add_message(self, tenant: str, idempotency_key: str, *, direction: str, body: str,
                     subject: Optional[str] = "Quick question", created_at: str = "2026-01-01T12:00:00Z",

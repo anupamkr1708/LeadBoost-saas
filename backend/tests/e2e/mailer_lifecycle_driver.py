@@ -17,7 +17,10 @@ outcome into the database. What it does and, just as important, does NOT do:
     dependent). The scheduler only decides WHEN these same functions run; the claim -> generate ->
     Txn B -> SMTP -> Txn C -> IMAP poll -> correlation code is the production code, unmodified.
   * It writes NOTHING into the Mailer's tables to simulate an outcome. The only SQL it runs is a
-    SELECT-only `query` (assertions), and `reset-db` on a guarded disposable database (below).
+    SELECT-only `query` (assertions), `reset-db` on a guarded disposable database (below), and -- since
+    C9.5 -- `tamper-message`: NOT an outcome but an ADVERSARIAL INPUT (a hostile or buggy writer altering the
+    stored text of an already-approved draft), behind the same disposable-database guard as `reset-db`. It
+    exists so the test can prove the SMTP worker refuses content that differs from what was approved.
   * The only fake is the LLM: the existing tests/fake_llm_provider.py, so generation is
     deterministic and no production LLM (Groq) is ever called.
 
@@ -107,6 +110,21 @@ def cmd_query(args) -> None:
         c.execute(text("SET TRANSACTION READ ONLY"))
         rows = [dict(r._mapping) for r in c.execute(text(sql))]
     _out(rows)
+
+
+def cmd_tamper_message(args) -> None:
+    """Adversarial fixture (C9.5): overwrite the stored BODY of one outbound draft Message, as a hostile or buggy
+    writer might after approval. Same destructive-database guard as reset-db; touches only that one row's body."""
+    _guard_destructive_database()
+    from sqlalchemy import text
+
+    message_id, body = int(args[0]), args[1]
+    with _engine().begin() as c:
+        n = c.execute(
+            text("UPDATE messages SET body = :b WHERE id = :i AND direction = 'outbound'"),
+            {"b": body, "i": message_id},
+        ).rowcount
+    _out({"tampered": n})
 
 
 def cmd_generate(args) -> None:
@@ -327,6 +345,7 @@ def cmd_infra(args) -> None:
 COMMANDS = {
     "reset-db": cmd_reset_db,
     "query": cmd_query,
+    "tamper-message": cmd_tamper_message,
     "generate": cmd_generate,
     "dispatch": cmd_dispatch,
     "poll": cmd_poll,
