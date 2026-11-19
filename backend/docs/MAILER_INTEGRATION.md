@@ -212,11 +212,13 @@ LeadBoost-integration contacts, while unsubscribe still suppresses.)
 
 See CONTRACT.md section 3a for the contract. In short: read an inbound message's `message_reference` from the
 mailer-state view, create an action with `reply_to_message_reference` (manual only, no explicit idempotency key),
-approve it, dispatch it. The Mailer then generates the reply (grounded on the real conversation), threads it to
-that inbound message, and the normal delivery worker sends it. `message_reference` is the Mailer's opaque
-32-hex reply token (never a database id) and is the one Mailer reference the browser receives; the Mailer
-resolves it tenant- and mailbox-scoped on every use. Approval authorizes the action rather than previewing the
-generated text.
+have the Mailer generate a draft, **review the exact text**, approve that text, then explicitly send it (C9.5; see
+CONTRACT.md section 3b and `C9_5_MANAGED_REPLY_CONTENT_APPROVAL.md`). The Mailer generates the reply (grounded on the
+real conversation) and **holds** it; LeadBoost shows the Mailer's persisted subject and body; approval is by the digest
+of that exact text; and "Send approved reply" releases the same draft, which the normal delivery worker sends, threaded
+to that inbound message. Approval and sending are two separate actions, and the Mailer re-verifies the digest
+immediately before SMTP. `message_reference` is the Mailer's opaque 32-hex reply token (never a database id) and is the
+one Mailer reference the browser receives; the Mailer resolves it tenant- and mailbox-scoped on every use.
 
 ## 6. Failure and consistency model
 
@@ -256,8 +258,12 @@ Full variable lists: LeadBoost in [`ENVIRONMENT.md`](ENVIRONMENT.md), Mailer in 
 
 ## 8. Known limitations
 
-* **Snapshot ≠ delivered text.** The Mailer generates its own message; LeadBoost's snapshot is not
-  synchronized and not claimed equivalent. A LeadBoost-side message must exist for an action to be created.
+* **Snapshot ≠ delivered text (ordinary outreach).** The Mailer generates its own message; LeadBoost's snapshot is not
+  synchronized and not claimed equivalent, and a LeadBoost-side message must exist for an ordinary action to be
+  created. **Replies are different (C9.5):** the user approves the Mailer's own persisted draft by digest, and a reply
+  can be created for a lead that has no outreach text.
+* **A cancelled or failed reply cannot be retried for the same inbound message** in this version, and drafts cannot be
+  edited or regenerated.
 * **Display name and sender organization are deployment-wide** on the Mailer, not per customer.
 * **Inbound provenance.** Webhook and legacy global IMAP mail is excluded from the LeadBoost view.
 * **IMAP provisioning** is a Mailer-API step, not part of LeadBoost's account flow.

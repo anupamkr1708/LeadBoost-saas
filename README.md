@@ -36,6 +36,10 @@ state and replies back in the dashboard. Finding a lead never sends an email by 
 * Server-to-server dispatch to the Mailer; the Mailer durably accepts it, generates the message, and sends over SMTP.
 * The Mailer polls the mailbox over IMAP, correlates replies to the conversation and classifies them.
 * LeadBoost reads a **read-only** conversation and delivery-state view from the Mailer and shows a product-safe version.
+* A person can **reply** to a specific inbound message: the Mailer drafts the reply and holds it, LeadBoost shows the exact
+  subject and body, the user approves *that exact text*, and a separate "Send approved reply" action releases it. The Mailer
+  re-verifies the approved text immediately before SMTP and refuses to send anything that differs
+  ([details and verification](backend/docs/C9_5_MANAGED_REPLY_CONTENT_APPROVAL.md)).
 
 The Mailer is a separate deployment with its own repository, database and encryption key:
 [`LeadBoost-mail-agent`](https://github.com/anupamkr1708/LeadBoost-mail-agent). LeadBoost is the customer-facing
