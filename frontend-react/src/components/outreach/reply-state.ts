@@ -14,6 +14,18 @@ export function isValidMessageReference(value: unknown): value is string {
   return typeof value === "string" && /^[0-9a-f]{32}$/.test(value);
 }
 
+/** The lead's ordinary outreach action: its first non-cancelled action that is NOT a reply. Replies are separate
+ * actions managed in the reply composer; if one were ever taken for the ordinary action, the ordinary Approve /
+ * Send controls would act on it. */
+export function selectOrdinaryActiveAction(actions: OutreachAction[] | undefined): OutreachAction | undefined {
+  return (actions ?? []).find((a) => a.state !== "cancelled" && !a.reply_to_message_reference);
+}
+
+/** The (single) reply action created for one specific inbound message, matched by its opaque reference. */
+export function findReplyAction(actions: OutreachAction[] | undefined, reference: string): OutreachAction | null {
+  return (actions ?? []).find((a) => a.reply_to_message_reference === reference) ?? null;
+}
+
 export type ReplyStage =
   | "idle" //               nothing created yet
   | "creating" //           creating the reply action / asking for the draft

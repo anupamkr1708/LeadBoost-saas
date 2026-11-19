@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { QualificationBadge } from "@/components/shared/status-badge";
 import { MailerStatePanel } from "@/components/outreach/mailer-state-panel";
 import { ReplyComposer } from "@/components/outreach/reply-composer";
+import { findReplyAction, selectOrdinaryActiveAction } from "@/components/outreach/reply-state";
 import { useUpdateLead } from "@/features/leads/hooks";
 import { useEmailAccounts } from "@/features/email-accounts/hooks";
 import {
@@ -66,10 +67,7 @@ export function OutreachCard({ lead }: { lead: Lead }) {
   const { data: actions } = useOutreachActionsForLead(lead.id);
   // Replies (C9.5) are separate actions managed in the reply composer; they must never be taken for the
   // lead's ordinary outreach action, or the ordinary Approve/Send controls below would act on a reply.
-  const activeAction = useMemo(
-    () => (actions ?? []).find((a) => a.state !== "cancelled" && !a.reply_to_message_reference),
-    [actions]
-  );
+  const activeAction = useMemo(() => selectOrdinaryActiveAction(actions), [actions]);
 
   // The inbound message the user chose to answer (one at a time). Its opaque reference is carried as data.
   const [replyTo, setReplyTo] = useState<{
@@ -79,10 +77,7 @@ export function OutreachCard({ lead }: { lead: Lead }) {
     bodyTruncated: boolean;
     receivedAt: string | null;
   } | null>(null);
-  const replyAction = useMemo(
-    () => (replyTo ? (actions ?? []).find((a) => a.reply_to_message_reference === replyTo.reference) ?? null : null),
-    [actions, replyTo]
-  );
+  const replyAction = useMemo(() => (replyTo ? findReplyAction(actions, replyTo.reference) : null), [actions, replyTo]);
   // The reply goes out from the same mailbox the reply action was created with, else the chosen sender.
   const replySender = useMemo(() => {
     const id = replyAction?.email_account_id ?? (selectedSenderId ? Number(selectedSenderId) : null);
