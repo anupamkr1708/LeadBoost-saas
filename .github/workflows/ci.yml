@@ -259,16 +259,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: anupamkr1708/LeadBoost-mail-agent
-          # C9.5: Mailer feature branch feat/managed-reply-content-approval at its final commit
-          # (test(mailer): prove approval-hold atomicity on real PostgreSQL), V3 revision. The cross-service tests below REQUIRE this
-          # revision: it adds the approval hold, the reply-draft read/release/cancel endpoints (incl. the legacy-reply
-          # 409 that LeadBoost's cancel relies on) and the send-time digest gate that the extended lifecycle exercises. The previous pin, a0f9454a (Mailer main after PR #27),
-          # does not have them.
-          #
-          # THIS IS A BRANCH COMMIT, NOT A MERGE COMMIT. After the Mailer PR is merged, replace it with the actual
-          # Mailer merge commit SHA (a squash merge makes this one unreachable) -- see
-          # verification/POST_MERGE_PIN_INSTRUCTIONS.md in the patchset. Never leave a guessed or placeholder SHA.
-          ref: 11ed72ed7ede262a092191d29b34808426aae30f
+          ref: 58439e7fa17ad462c92906922414bdbff859fda8
           path: mailer-agent
 
       - uses: actions/setup-python@v5
