@@ -916,8 +916,51 @@ def claim_outreach_action_for_dispatch(db: Session, *, organization_id: int, act
     )
 
 
+def mark_reply_draft_requested(
+    db: Session,
+    *,
+    organization_id: int,
+    action_id: int,
+    requested_at: datetime,
+    mailing_agent_reference: Optional[str],
+) -> int:
+    """Record that the Mailer ACCEPTED the request to generate this reply's draft (C9.5).
+
+    One guarded UPDATE: only a still-PENDING_REVIEW reply action matches, so a draft can never be (re)started
+    for an action that has since been approved, dispatched or cancelled. The first acceptance fixes
+    reply_draft_requested_at; a replay (same idempotency key, Mailer replays rather than regenerating) leaves it
+    alone and is idempotent. Returns rows updated (0 = the action is no longer PENDING_REVIEW).
+    """
+    values: dict = {}
+    if mailing_agent_reference:
+        values["mailing_agent_reference"] = mailing_agent_reference
+    row = (
+        db.query(OutreachAction)
+        .filter(
+            OutreachAction.id == action_id,
+            OutreachAction.organization_id == organization_id,
+            OutreachAction.state == OutreachState.PENDING_REVIEW,
+            OutreachAction.reply_to_message_reference.isnot(None),
+        )
+    )
+    updated = row.filter(OutreachAction.reply_draft_requested_at.is_(None)).update(
+        {"reply_draft_requested_at": requested_at, **values}, synchronize_session=False
+    )
+    if updated:
+        return updated
+    # Already marked: nothing to change, but report whether the action is still a valid target.
+    return row.count()
+
+
 def claim_outreach_action_for_approval(
-    db: Session, *, organization_id: int, action_id: int, approved_by_user_id: int, approved_at: datetime
+    db: Session,
+    *,
+    organization_id: int,
+    action_id: int,
+    approved_by_user_id: int,
+    approved_at: datetime,
+    approved_content_sha256: Optional[str] = None,
+    approved_draft_version: Optional[int] = None,
 ) -> int:
     """Atomic approval claim -- the same "UPDATE that both filters on and
     changes state in one statement" idea as claim_outreach_action_for_dispatch
@@ -950,6 +993,17 @@ def claim_outreach_action_for_approval(
                 "state": OutreachState.APPROVED,
                 "approved_by_user_id": approved_by_user_id,
                 "approved_at": approved_at,
+                # Managed replies (C9.5): the approved-content evidence is written by THIS statement, so the
+                # transition to APPROVED and the digest it authorizes can never be observed apart. Ordinary
+                # outreach passes neither argument and so writes exactly the three columns it always did.
+                **(
+                    {
+                        "approved_content_sha256": approved_content_sha256,
+                        "approved_draft_version": approved_draft_version,
+                    }
+                    if approved_content_sha256 is not None
+                    else {}
+                ),
             },
             synchronize_session=False,
         )

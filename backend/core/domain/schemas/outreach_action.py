@@ -59,6 +59,11 @@ class OutreachAction(BaseModel):
     correlation_id: Optional[str] = None
     idempotency_key: str
     reply_to_message_reference: Optional[str] = None
+    # C9.5 (replies only; None otherwise): when the Mailer accepted the draft request, and the digest/version of the
+    # exact draft the user approved.
+    reply_draft_requested_at: Optional[datetime] = None
+    approved_content_sha256: Optional[str] = None
+    approved_draft_version: Optional[int] = None
     reason: Optional[str] = None
     approved_by_user_id: Optional[int] = None
     approved_at: Optional[datetime] = None
