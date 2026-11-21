@@ -14,9 +14,31 @@
 # scraping into its own service if memory becomes tight in production.
 
 # ---------------------------------------------------------------------------
+# Pinned inputs -- nothing here may move on its own; upgrade them deliberately
+#
+#   * base image  python:3.12-slim@sha256:...   BOTH `FROM` lines, the same digest
+#   * Playwright  playwright==<x.y.z>           backend/requirements.txt (keep its CRLF line endings)
+#   * libatomic1  in the runtime apt-get below  (the Node driver bundled with Playwright needs it)
+#
+# Why: a floating tag plus `playwright>=1.40.0,<2.0.0` broke the CI docker-build once. The tag had moved to
+# Debian trixie and Playwright had resolved to 1.65.2, whose bundled Node driver needs libatomic.so.1.
+#
+# To upgrade (do all of it, then let CI's `docker-build` job pass before merging):
+#   1. docker buildx imagetools inspect python:3.12-slim
+#      Copy the top-level `Digest:` (the manifest list, not one platform's manifest).
+#   2. Put it in BOTH `FROM python:3.12-slim@sha256:... AS ...` lines (builder and runtime must match).
+#   3. Set the new Playwright version in backend/requirements.txt (a bump may need a new apt package).
+#   4. docker build --no-cache -t leadboost-backend:check backend
+#      This also runs `playwright install --with-deps chromium` below: it must succeed.
+#   5. docker run --rm --entrypoint python leadboost-backend:check --version
+#      docker run --rm --entrypoint pip leadboost-backend:check show playwright
+#      docker run --rm --entrypoint dpkg leadboost-backend:check -s libatomic1
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
 # Stage 1: builder
 # ---------------------------------------------------------------------------
-FROM python:3.12-slim AS builder
+FROM python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -43,7 +65,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # ---------------------------------------------------------------------------
 # Stage 2: runtime
 # ---------------------------------------------------------------------------
-FROM python:3.12-slim AS runtime
+FROM python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
