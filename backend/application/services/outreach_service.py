@@ -1000,8 +1000,15 @@ async def get_reply_draft(db: Session, *, organization_id: int, action_id: int) 
     if action.reply_draft_requested_at is None:
         return ReplyDraftView(state="not_started")
 
+    # Copy what the network call needs, then end the read transaction: no pooled DB connection is held across the
+    # Mailer call (up to MAILING_AGENT_TIMEOUT_SECONDS, and the browser polls this read while a draft is being
+    # generated). Same convention as outreach_mailer_state.get_outreach_mailer_state. The rollback expires `action`,
+    # so it must not be touched again below.
+    idempotency_key = action.idempotency_key
+    db.rollback()
+
     result = await reply_draft_client.fetch_reply_draft(
-        organization_id=organization_id, idempotency_key=action.idempotency_key
+        organization_id=organization_id, idempotency_key=idempotency_key
     )
     if result.status == "ok":
         d = result.draft
