@@ -27,6 +27,10 @@ documents; every link is relative to this directory.
 | [`MAILER_INTEGRATION.md`](MAILER_INTEGRATION.md) | The LeadBoost ⇄ Mailer contract from the product's perspective |
 | [`../core/infrastructure/mailing_agent/CONTRACT.md`](../core/infrastructure/mailing_agent/CONTRACT.md) | Canonical LeadBoost-side wire contract |
 | [`C9_5_MANAGED_REPLY_CONTENT_APPROVAL.md`](C9_5_MANAGED_REPLY_CONTENT_APPROVAL.md) | Exact-content approval of managed replies: design, frontend, and dated verification record |
+| [`C9_5_ROLLOUT_RUNBOOK.md`](C9_5_ROLLOUT_RUNBOOK.md) | C9.5 production rollout and rollback: go/no-go, order (Mailer first), decisions, rollback per stage |
+| [`C9_5_SMOKE_TEST.md`](C9_5_SMOKE_TEST.md) | Hosted smoke test with a dummy organisation and two own mailboxes, plus the read-only verifier |
+| [`C9_5_RESTORE_DRILL.md`](C9_5_RESTORE_DRILL.md) | Restore drill on a restored copy, with pass/fail criteria |
+| [`evidence/`](evidence/) | Blank evidence records (rehearsal results, hosted acceptance); fill after running |
 | [Mailer L1 mailbox contract](https://github.com/anupamkr1708/LeadBoost-mail-agent/blob/main/docs/LEADBOOST_L1_MAILBOX_CONTRACT.md) | Canonical Mailer-side mailbox contract |
 | [Mailer C13 deployment runbook](https://github.com/anupamkr1708/LeadBoost-mail-agent/blob/main/docs/C13_DEPLOYMENT_RUNBOOK.md) | Mailer deployment and operations |
 
