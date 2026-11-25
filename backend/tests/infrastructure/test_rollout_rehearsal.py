@@ -1,0 +1,213 @@
+"""scripts/rollout_rehearsal.py: safety guard, pure logic, and a drift test for its revision table.
+
+No PostgreSQL is needed: the revision table is proven against real ``alembic upgrade`` runs on SQLite, one
+revision at a time, so the harness cannot silently disagree with alembic/versions/.
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import os
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+import pytest
+from sqlalchemy import create_engine, inspect
+
+BACKEND = Path(__file__).resolve().parents[2]
+SCRIPT = BACKEND / "scripts" / "rollout_rehearsal.py"
+
+_spec = importlib.util.spec_from_file_location("rollout_rehearsal", SCRIPT)
+rr = importlib.util.module_from_spec(_spec)
+sys.modules["rollout_rehearsal"] = rr
+_spec.loader.exec_module(rr)
+
+
+@pytest.mark.parametrize(
+    "host,port", [("db.example.com", 56432), ("127.0.0.1", 5432), ("localhost", 56432), (None, None)]
+)
+def test_server_other_than_the_throwaway_container_is_refused(host, port):
+    with pytest.raises(rr.Refused):
+        rr.assert_rehearsal_server(host, port)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "leadboost",
+        "postgres",
+        "c95_rehearsal_",
+        "x_c95_rehearsal_y",
+        'c95_rehearsal_x"; DROP DATABASE postgres; --',
+        "",
+        None,
+    ],
+)
+def test_database_names_outside_the_prefix_are_refused(name):
+    with pytest.raises(rr.Refused):
+        rr.assert_rehearsal_db_name(name)
+
+
+def test_admin_url_and_generated_names():
+    with pytest.raises(rr.Refused):
+        rr.parse_admin_url("postgresql://u:p@prod.example.com:5432/postgres")
+    admin = rr.parse_admin_url("postgresql://postgres:p%40ss@127.0.0.1:56432/postgres")
+    assert admin["password"] == "p@ss"
+    name = rr.make_db_name("Prod dump!", datetime(2026, 11, 25, 1, 2, 3, tzinfo=timezone.utc))
+    assert name == "c95_rehearsal_lb_prod_dump_20261125t010203z"
+    assert rr.db_url(admin, name).endswith("/" + name)
+    with pytest.raises(rr.Refused):
+        rr.db_url(admin, "leadboost")
+
+
+def test_children_get_no_secrets_and_the_job_loop_is_off(monkeypatch):
+    for k in (
+        "GROQ_API_KEY",
+        "SERPER_API_KEY",
+        "STRIPE_SECRET_KEY",
+        "MAILING_AGENT_ORG_API_KEYS",
+        "DATABASE_URL",
+    ):
+        monkeypatch.setenv(k, "real-looking-" + k)
+    admin = rr.parse_admin_url("postgresql://postgres:pw@127.0.0.1:56432/postgres")
+    env = rr.child_env(admin, "c95_rehearsal_lb_x")
+    assert not any(
+        k in env
+        for k in ("GROQ_API_KEY", "SERPER_API_KEY", "STRIPE_SECRET_KEY", "MAILING_AGENT_ORG_API_KEYS")
+    )
+    assert env["DATABASE_URL"].endswith("@127.0.0.1:56432/c95_rehearsal_lb_x")
+    assert env["JOB_WORKER_ENABLED"] == "false" and env["ENVIRONMENT"] == "development"
+    assert env["LIVE_SENDING_ENABLED"] == "false" and env["AUTO_REPLY_ENABLED"] == "false"
+    assert len(env["SECRET_KEY"]) >= 32
+
+
+def test_dotenv_anywhere_above_is_refused(tmp_path):
+    deep = tmp_path / "a" / "b"
+    deep.mkdir(parents=True)
+    rr.refuse_if_dotenv(deep)  # nothing there: fine
+    (tmp_path / ".env").write_text("X=1")
+    with pytest.raises(rr.Refused):
+        rr.refuse_if_dotenv(deep)
+
+
+def _run(env_extra: dict, *args: str) -> subprocess.CompletedProcess:
+    env = {"PATH": os.environ.get("PATH", "")}
+    env.update(env_extra)
+    return subprocess.run(
+        [sys.executable, str(SCRIPT), *args], cwd=BACKEND, env=env, capture_output=True, text=True, timeout=60
+    )
+
+
+def test_cli_refuses_a_non_throwaway_server_and_never_echoes_the_password(tmp_path):
+    p = _run(
+        {
+            "REHEARSAL_ADMIN_URL": "postgresql://u:SECRETPW@db.example.com:5432/postgres",
+            "REHEARSAL_STATE_DIR": str(tmp_path),
+        },
+        "cleanup",
+    )
+    assert p.returncode == 2 and "REFUSED" in p.stderr and "SECRETPW" not in p.stdout + p.stderr
+
+
+def test_dump_kind_and_toc_parsing():
+    assert rr.dump_kind(b"PGDMP\x01\x0e") == "custom"
+    assert rr.dump_kind(b"-- PostgreSQL database dump") == "plain"
+    assert rr.dump_kind(b"\x1f\x8b\x08") == "gzip"
+    assert rr.dump_kind(b"random bytes") == "unknown"
+    listing = (
+        ";\n; Archive created at 2026-11-25 00:00:00 UTC\n;     dbname: secret_name\n;     Dumped from database version: 16.4\n"
+        ";     Dumped by pg_dump version: 16.4\n;     Format: CUSTOM\n;     Compression: gzip\n"
+        "218; 1259 16385 TABLE public leads x\n3590; 0 16385 TABLE DATA public leads x\n"
+    )
+    info = rr.parse_toc_header(listing)
+    assert info["table_data"] == 1 and info["tables"] == 1 and info["Dumped from database version"] == "16.4"
+    assert "secret_name" not in str(info), "the database name must not be echoed"
+
+
+def test_schema_snapshot_normalisation_drops_comments_and_restrict_tokens():
+    text = "--\n-- header\n\\restrict abc\nCREATE TABLE a (id int);\n\n\\unrestrict abc\n"
+    assert rr.normalize_schema_dump(text) == ["CREATE TABLE a (id int);"]
+
+
+def _tables_cols(upto: int) -> tuple[set[str], dict[str, set[str]]]:
+    tables, cols = set(), {}
+    for spec in rr.REVISION_SPEC[: upto + 1]:
+        tables |= set(spec["tables"])
+        for t, cs in spec["columns"].items():
+            cols.setdefault(t, set()).update(cs)
+    return tables, cols
+
+
+def test_classify_clean_baseline_mixed_head():
+    t, c = _tables_cols(0)
+    r = rr.classify_revisions(t, c)
+    assert (r["verdict"], r["at_revision"]) == ("clean-at-revision", rr.BASELINE)
+    t, c = _tables_cols(len(rr.REVISION_SPEC) - 1)
+    r = rr.classify_revisions(t, c)
+    assert (r["verdict"], r["at_revision"]) == ("at-head", rr.HEAD)
+    # create_all after the baseline: the later tables exist, the later COLUMNS of the old tables do not
+    t, c = _tables_cols(len(rr.REVISION_SPEC) - 1)
+    c["users"].discard("job_title")
+    r = rr.classify_revisions(t, c)
+    assert r["verdict"] == "mixed" and r["revisions"][1]["status"] == "partial"
+    assert rr.classify_revisions(set(), {})["verdict"] == "not-a-leadboost-schema"
+
+
+def test_downgrade_table_covers_every_revision_above_the_baseline():
+    assert set(rr.DOWNGRADE_DROPS) == {s["rev"] for s in rr.REVISION_SPEC[1:]}
+
+
+def _upgrade(db_file: Path, target: str) -> None:
+    env = {
+        "PATH": os.environ.get("PATH", ""),
+        "DATABASE_URL": f"sqlite:///{db_file}",
+        "SECRET_KEY": "k" * 40,
+        "ENVIRONMENT": "development",
+        "PYTHONDONTWRITEBYTECODE": "1",
+    }
+    p = subprocess.run(
+        [sys.executable, "-m", "alembic", "upgrade", target],
+        cwd=BACKEND,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+    assert p.returncode == 0, p.stderr[-800:]
+
+
+def test_revision_table_matches_what_alembic_really_creates(tmp_path):
+    """For every revision R: after `alembic upgrade R`, the objects of revisions <= R exist and those of later ones do not."""
+    db_file = tmp_path / "drift.db"
+    for i, spec in enumerate(rr.REVISION_SPEC):
+        _upgrade(db_file, spec["rev"])
+        eng = create_engine(f"sqlite:///{db_file}")
+        insp = inspect(eng)
+        tables = set(insp.get_table_names())
+        cols = {t: {c["name"] for c in insp.get_columns(t)} for t in tables}
+        eng.dispose()
+        verdict = rr.classify_revisions(tables - {"alembic_version"}, cols)
+        statuses = [r["status"] for r in verdict["revisions"]]
+        assert statuses[: i + 1] == ["present"] * (i + 1), (spec["rev"], verdict["revisions"])
+        assert statuses[i + 1 :] == ["absent"] * (len(statuses) - i - 1), (spec["rev"], verdict["revisions"])
+    head = verdict
+    assert head["verdict"] == "at-head" and rr.REVISION_SPEC[-1]["rev"] == rr.HEAD
+
+
+def test_the_harness_head_constant_is_the_single_alembic_head():
+    versions = sorted((BACKEND / "alembic" / "versions").glob("*.py"))
+    revs = {}
+    for f in versions:
+        text = f.read_text(encoding="utf-8")
+        rev = next(ln.split("'")[1] for ln in text.splitlines() if ln.startswith("revision:"))
+        down = next(
+            ln.split("'")[1] if "'" in ln else None
+            for ln in text.splitlines()
+            if ln.startswith("down_revision:")
+        )
+        revs[rev] = down
+    heads = set(revs) - set(d for d in revs.values() if d)
+    assert heads == {rr.HEAD} and len(revs) == len(rr.REVISION_SPEC)
+    assert [s["rev"] for s in rr.REVISION_SPEC][0] == rr.BASELINE and revs[rr.BASELINE] is None
