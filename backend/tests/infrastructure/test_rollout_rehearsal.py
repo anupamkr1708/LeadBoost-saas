@@ -26,7 +26,15 @@ _spec.loader.exec_module(rr)
 
 
 @pytest.mark.parametrize(
-    "host,port", [("db.example.com", 56432), ("127.0.0.1", 5432), ("localhost", 56432), (None, None)]
+    "host,port",
+    [
+        ("db.example.com", 56432),
+        ("127.0.0.1", 5432),
+        ("127.0.0.1", 56431),
+        ("127.0.0.1", 56434),
+        ("localhost", 56432),
+        (None, None),
+    ],
 )
 def test_server_other_than_the_throwaway_container_is_refused(host, port):
     with pytest.raises(rr.Refused):
@@ -211,3 +219,94 @@ def test_the_harness_head_constant_is_the_single_alembic_head():
     heads = set(revs) - set(d for d in revs.values() if d)
     assert heads == {rr.HEAD} and len(revs) == len(rr.REVISION_SPEC)
     assert [s["rev"] for s in rr.REVISION_SPEC][0] == rr.BASELINE and revs[rr.BASELINE] is None
+
+
+def test_both_throwaway_servers_are_accepted():
+    rr.assert_rehearsal_server("127.0.0.1", 56432)
+    rr.assert_rehearsal_server("127.0.0.1", 56433)
+    admin = rr.parse_admin_url("postgresql://postgres:pw@127.0.0.1:56433/postgres")
+    assert rr.db_url(admin, "c95_rehearsal_lb_x").endswith("@127.0.0.1:56433/c95_rehearsal_lb_x")
+
+
+def _wint(v: int) -> bytes:
+    return bytes([1 if v < 0 else 0]) + abs(v).to_bytes(4, "little")
+
+
+def _wstr(s: str) -> bytes:
+    raw = s.encode()
+    return _wint(len(raw)) + raw
+
+
+def _archive(
+    version=(1, 16, 0), server="17.5 (Debian 17.5-1.pgdg120+1)", dumper="17.5 (Debian 17.5-1.pgdg120+1)"
+) -> bytes:
+    head = b"PGDMP" + bytes(version) + bytes([4, 8, 1])
+    head += bytes([2]) if version >= (1, 15, 0) else _wint(-1)
+    head += b"".join(_wint(v) for v in (1, 2, 3, 4, 5, 126, 0))
+    head += _wstr("my_secret_database_name")
+    if version >= (1, 10, 0):
+        head += _wstr(server) + _wstr(dumper)
+    return head + b"\x00" * 64
+
+
+def test_archive_header_reader_gets_versions_and_never_the_database_name(tmp_path):
+    f = tmp_path / "d.dump"
+    f.write_bytes(_archive())
+    hdr = rr.read_archive_header(f)
+    assert hdr["archive_version"] == "1.16.0" and hdr["server_version"].startswith("17.5")
+    assert hdr["pg_dump_version"].startswith("17.5")
+    assert "my_secret_database_name" not in str(hdr)
+    f.write_bytes(_archive(version=(1, 14, 0), server="15.4", dumper="15.4"))
+    assert rr.read_archive_header(f)["server_version"] == "15.4"
+    f.write_bytes(b"not an archive")
+    with pytest.raises(ValueError):
+        rr.read_archive_header(f)
+
+
+def test_suggested_major_is_the_newer_of_server_and_pg_dump():
+    assert rr.suggest_pg_major({"server_version": "16.3", "pg_dump_version": "17.2"}) == 17
+    assert rr.suggest_pg_major({"server_version": "17.5 (Debian)", "pg_dump_version": "16.9"}) == 17
+    assert rr.suggest_pg_major({}) is None and rr.major_of("garbage") is None
+
+
+def test_restore_refuses_before_creating_anything_when_the_client_cannot_read_the_archive(tmp_path):
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    tool = fake / "pg_restore"
+    tool.write_text(
+        "#!/bin/sh\necho 'pg_restore: error: unsupported version (1.16) in file header' >&2\nexit 1\n"
+    )
+    tool.chmod(0o755)
+    dump = tmp_path / "d.dump"
+    dump.write_bytes(_archive())
+    state = tmp_path / "state"
+    env = {
+        "PATH": f"{fake}:{os.environ.get('PATH', '')}",
+        "REHEARSAL_ADMIN_URL": "postgresql://postgres:pw@127.0.0.1:56432/postgres",
+        "REHEARSAL_STATE_DIR": str(state),
+    }
+    p = subprocess.run(
+        [sys.executable, str(SCRIPT), "restore", "--dump", str(dump), "--label", "x"],
+        cwd=BACKEND,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert p.returncode == 3, p.stdout + p.stderr
+    assert "needs a PostgreSQL 17" in p.stderr and "No database was created" in p.stderr
+    assert not (
+        state / "rehearsal_lb_state.json"
+    ).exists(), "nothing may be recorded: no database was created"
+    p = subprocess.run(
+        [sys.executable, str(SCRIPT), "inspect-dump", "--dump", str(dump)],
+        cwd=BACKEND,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert p.returncode == 3 and "postgres:17" in p.stdout and "c95-pg17" in p.stdout and "1.16.0" in p.stdout
+    assert "my_secret_database_name" not in p.stdout + p.stderr

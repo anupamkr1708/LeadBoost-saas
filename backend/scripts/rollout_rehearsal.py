@@ -7,7 +7,8 @@ is table names, row COUNTS, revision ids, exit codes and timings only.
 
 SAFETY (refuses, never warns)
 -----------------------------
-* The server must be 127.0.0.1:56432 (the throw-away ``c95-pg16`` container); every database this script creates,
+* The server must be 127.0.0.1:56432 (the throw-away ``c95-pg16`` container) or, only for a dump made by a newer PostgreSQL,
+  127.0.0.1:56433 (``c95-pg17``, created by the owner); every database this script creates,
   copies, restores or drops is named ``c95_rehearsal_*``. Anything else exits 2 before a statement is sent.
 * Refuses if a ``.env`` exists in ``backend/`` or any parent directory (``load_dotenv()`` would pull real settings in).
 * Children get an allow-listed environment: no LLM, SMTP, Stripe or Mailer key, ``ENVIRONMENT=development``,
@@ -23,7 +24,7 @@ optional ``PYTHON`` (interpreter for alembic/uvicorn children).
 Subcommands (run from ``backend/``; all read-only except restore/adopt/wrong-order/cleanup, which only touch
 databases named c95_rehearsal_*)::
 
-    inspect-dump --dump FILE          format, archive/server versions, TOC counts (no data)
+    inspect-dump --dump FILE          format, archive/server versions (read from the header), TOC counts (no data)
     restore --dump FILE --label L     new database c95_rehearsal_lb_<L>_<UTC>; prints its name and row counts
     probe --db NAME                   which Alembic revisions' objects exist (read-only) + verify_baseline_schema result
     counts --db NAME                  row counts only (read-only)
@@ -57,6 +58,9 @@ from urllib.parse import quote, unquote, urlsplit
 
 BACKEND = Path(__file__).resolve().parent.parent
 GUARD_HOST, GUARD_PORT, DB_PREFIX = "127.0.0.1", 56432, "c95_rehearsal_"
+# A second throw-away server is allowed ONLY for a dump made by a newer PostgreSQL than c95-pg16 can read
+# (c95-pg17 on 127.0.0.1:56433, created by the owner). Nothing else is ever accepted.
+ALLOWED_PORTS = (GUARD_PORT, 56433)
 EXIT_OK, EXIT_FAIL, EXIT_REFUSED, EXIT_ENV = 0, 1, 2, 3
 _DB_NAME_OK = re.compile(r"^c95_rehearsal_[a-z0-9_]{1,50}$")
 BASELINE, HEAD = "eaa40e596fcc", "e5c9a3b7d214"
@@ -66,6 +70,10 @@ SECRET_KEY = "rehearsal-" + "k" * 40  # >= 32 chars, synthetic, not a real secre
 
 class Refused(Exception):
     pass
+
+
+class EnvProblem(Exception):
+    """The environment cannot do what was asked (for example the dump needs a newer PostgreSQL client)."""
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -163,10 +171,10 @@ DOWNGRADE_DROPS = {
 # Guard + pure logic (unit-tested without a database)
 # ---------------------------------------------------------------------------------------------------------------
 def assert_rehearsal_server(host, port) -> None:
-    if (host or "").lower() != GUARD_HOST or port != GUARD_PORT:
+    if (host or "").lower() != GUARD_HOST or port not in ALLOWED_PORTS:
         raise Refused(
-            f"refusing: the PostgreSQL server must be {GUARD_HOST}:{GUARD_PORT} (the throw-away c95-pg16 "
-            f"container); got host={host!r} port={port!r}. Nothing was sent."
+            f"refusing: the PostgreSQL server must be {GUARD_HOST}:{' or '.join(str(x) for x in ALLOWED_PORTS)} "
+            f"(the throw-away c95-pg* containers); got host={host!r} port={port!r}. Nothing was sent."
         )
 
 
@@ -262,6 +270,68 @@ def normalize_schema_dump(text: str) -> list[str]:
             continue
         out.append(s)
     return out
+
+
+def read_archive_header(path: Path) -> dict:
+    """Parse ONLY the version fields of a pg_dump custom-format header (the layout is the same for 1.15 and 1.16).
+
+    Lets us learn which PostgreSQL made a dump without a client that can read it. The database name is read only to
+    advance past it and is never returned or printed.
+    """
+    with open(path, "rb") as f:
+        buf = f.read(4096)
+    if not buf.startswith(b"PGDMP"):
+        raise ValueError("not a custom-format archive")
+    pos = 5
+
+    def byte() -> int:
+        nonlocal pos
+        pos += 1
+        return buf[pos - 1]
+
+    ver = (byte(), byte(), byte())
+    int_size, _off_size, fmt = byte(), byte(), byte()
+
+    def rint() -> int:
+        sign, v = byte(), 0
+        for i in range(int_size):
+            v |= byte() << (8 * i)
+        return -v if sign else v
+
+    def rstr() -> str | None:
+        nonlocal pos
+        n = rint()
+        if n < 0:
+            return None
+        pos += n
+        return buf[pos - n : pos].decode("utf-8", "replace")
+
+    if ver >= (1, 15, 0):
+        byte()  # compression algorithm
+    else:
+        rint()  # compression level
+    for _ in range(7):
+        rint()  # creation time
+    out: dict = {"archive_version": ".".join(str(x) for x in ver), "format": fmt}
+    if ver >= (1, 4, 0):
+        rstr()  # database name: skipped, never kept
+    if ver >= (1, 10, 0):
+        out["server_version"] = rstr()
+        out["pg_dump_version"] = rstr()
+    return out
+
+
+def major_of(version_text: str | None) -> int | None:
+    m = re.match(r"\s*(\d+)", version_text or "")
+    return int(m.group(1)) if m else None
+
+
+def suggest_pg_major(header: dict) -> int | None:
+    """The smallest PostgreSQL major that can restore the dump: the newer of the server and pg_dump that produced it."""
+    majors = [
+        m for m in (major_of(header.get("server_version")), major_of(header.get("pg_dump_version"))) if m
+    ]
+    return max(majors) if majors else None
 
 
 def dump_kind(head: bytes) -> str:
@@ -553,17 +623,27 @@ def cmd_inspect_dump(admin, dump: Path) -> int:
     kind = dump_kind(head)
     T.say(f"  size: {dump.stat().st_size} bytes; kind: {kind}")
     if kind == "custom":
+        hdr = {}
+        try:
+            hdr = read_archive_header(dump)
+            T.say("  header (versions only): " + json.dumps(hdr))
+        except (ValueError, IndexError) as exc:
+            T.say(f"  header not readable here ({type(exc).__name__}); continuing with pg_restore --list")
         cmd, env = pg_client_cmd(admin, "pg_restore", None, ["--list"])
         rc, out, _ = sh(cmd, env, stdin_path=dump, timeout=300)
         if rc != 0:
-            msg = tail(out, 3)
-            T.say(f"  pg_restore --list FAILED (rc={rc}): {msg}")
-            if "unsupported version" in out or "unsupported" in out:
+            T.say(f"  pg_restore --list FAILED (rc={rc}): {tail(out, 3)}")
+            if "unsupported" in out:
+                need = suggest_pg_major(hdr)
                 T.say(
-                    "  STOP: the dump was made by a newer pg_dump than the c95-pg16 client (PostgreSQL 16) can read."
+                    "  STOP: the dump was made by a newer PostgreSQL than the client in this container can read."
                 )
+                if need:
+                    T.say(
+                        f"  It needs a PostgreSQL {need} (or newer) server container: postgres:{need}, named c95-pg{need}, 127.0.0.1:56433 only."
+                    )
                 T.say(
-                    "  Creating another container needs the owner's consent and a c95-* name. Do not continue."
+                    "  Creating another container needs the owner's consent. Do not continue until it exists."
                 )
             return EXIT_ENV
         info = parse_toc_header(out)
@@ -586,6 +666,23 @@ def cmd_inspect_dump(admin, dump: Path) -> int:
 
 def restore_dump(admin, dump: Path, label: str) -> str:
     kind = dump_kind(open(dump, "rb").read(64))
+    if kind == "custom":  # preflight BEFORE creating anything: can this client read the archive at all?
+        cmd, env = pg_client_cmd(admin, "pg_restore", None, ["--list"])
+        rc, out, _ = sh(cmd, env, stdin_path=dump, timeout=300)
+        if rc != 0:
+            need = None
+            try:
+                need = suggest_pg_major(read_archive_header(dump))
+            except (ValueError, IndexError):
+                pass
+            raise EnvProblem(
+                f"pg_restore cannot read this dump ({tail(out, 2)}). No database was created."
+                + (
+                    f" It needs a PostgreSQL {need} (or newer) throw-away server (see inspect-dump)."
+                    if need
+                    else ""
+                )
+            )
     name = make_db_name(label)
     create_db(admin, name)
     if kind == "custom":
@@ -599,6 +696,11 @@ def restore_dump(admin, dump: Path, label: str) -> str:
     T.say(f"  restore into {name}: rc={rc}, {len(errs)} error line(s), {dt:.1f}s")
     for e in errs[:5]:
         T.say("    " + e[:200])
+    if not table_counts(admin, name):
+        drop_db(admin, name)
+        raise EnvProblem(
+            f"the restore produced no tables (rc={rc}); the empty database was dropped. First error: {errs[0][:200] if errs else 'none'}"
+        )
     return name
 
 
@@ -664,6 +766,10 @@ def cmd_adopt(admin, db: str, stamp: str, cont: bool, chain: bool, state_dir: Pa
     rev = BASELINE if stamp == "baseline" else "head"
     T.step(f"A. before: counts, revision, backup (and proof the backup restores) for {db}")
     before = table_counts(admin, db)
+    if not before:
+        raise EnvProblem(
+            "this database has no tables: the restore did not work, so there is nothing to adopt. Nothing was changed."
+        )
     T.say("  counts: " + json.dumps({k: v for k, v in before.items() if v}))
     T.say(f"  alembic_version: {alembic_version(admin, db) or 'ABSENT'}")
     backup = state_dir / f"backup_{db}.dump"
@@ -1000,6 +1106,9 @@ def main(argv=None) -> int:
     except Refused as exc:
         print(f"REFUSED: {exc}", file=sys.stderr)
         return EXIT_REFUSED
+    except EnvProblem as exc:
+        print(f"ENVIRONMENT PROBLEM: {exc}", file=sys.stderr)
+        return EXIT_ENV
     return EXIT_OK
 
 
