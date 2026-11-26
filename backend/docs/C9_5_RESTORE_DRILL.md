@@ -25,7 +25,7 @@ lbr counts --db "$DB"
 
 | # | Criterion | PASS | FAIL / stop |
 |---|---|---|---|
-| 1 | `inspect-dump` recognises the format and the archive version is readable by the container's `pg_restore` | exit 0 | exit 3 with "unsupported version": the dump was made by a newer PostgreSQL than 16; **stop**, creating another `c95-*` container needs the owner's consent |
+| 1 | `inspect-dump` recognises the format and the archive version is readable by the container's `pg_restore` | exit 0 | exit 3 with "unsupported version": the dump was made by a newer PostgreSQL than 16. `inspect-dump` prints the versions from the header and the container image needed; creating that extra `c95-pgN` container (127.0.0.1:56433 only) needs the owner's consent (steps 2a/2b of `evidence/ROLLOUT_REHEARSAL_RESULTS.md`); then use `lbr17` instead of `lbr` |
 | 2 | `restore` completes | `restored database has tables`; 0 or only ignorable error lines (roles/ownership) | any error about a missing table or data |
 | 3 | Row counts after restore are plausible against what you know of production (counts only are printed) | yes | a table you know has data shows 0 |
 | 4 | `probe` verdict is recorded (`at-head`, `clean-at-revision <R>`, `mixed`) | any, but it **must be written down**: it decides the adoption path (runbook D4) | |

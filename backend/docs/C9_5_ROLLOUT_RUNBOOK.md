@@ -161,7 +161,9 @@ is a Railway worker; the runbook "worker deployed through the Render Blueprint" 
 3. Back up `MAILBOX_ENCRYPTION_KEY` offline, separately.
 
 ### 6.2 Rehearsals on your machine (never against production)
-Prerequisite: the throw-away container `c95-pg16` (PostgreSQL 16, `127.0.0.1:56432`). All commands refuse anything else.
+Prerequisite: the throw-away container `c95-pg16` (PostgreSQL 16, `127.0.0.1:56432`). All commands refuse anything else. If the dump was made by a newer PostgreSQL
+(`pg_restore: unsupported version (1.16)` = PostgreSQL 17 or newer), the LeadBoost harness also accepts one extra owner-created container, `c95-pg17` on `127.0.0.1:56433`
+(`ROLLOUT_REHEARSAL_RESULTS.md` sections 2a-2b). **Production's PostgreSQL major version follows from that header and should be written into the evidence record.**
 - Mailer (synthetic data; ~1 minute): `python scripts/rehearse_c95_migrations.py run` - exit 0 means every expectation held.
 - LeadBoost, on the restored production dump: the exact command sequence is in `docs/evidence/ROLLOUT_REHEARSAL_RESULTS.md` (inspect-dump, restore, probe,
   app-start with the job loop off, adopt, wrong-order, cleanup). The dump is read from stdin and is never printed, copied or committed.

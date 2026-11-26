@@ -30,6 +30,31 @@ Expected: `exit=0`, the last lines `expectations: 63, failed: 0` (the count may 
 | Anything surprising | |
 
 ## 2. LeadBoost: the dump copy (read-only first)
+
+> **If `inspect-dump` reports that the dump needs a newer PostgreSQL** (archive version above what `c95-pg16` reads, e.g. `1.16` = made by PostgreSQL 17 or newer),
+> do sections 2a and 2b first; from then on use **`lbr17` instead of `lbr`** and **`pick17` instead of `pick`** everywhere in sections 2-5. Nothing else changes.
+> The Mailer rehearsal (section 1) keeps using `c95-pg16`.
+
+### 2a. Learn which PostgreSQL made the dump (reads only the header's version strings; never the database name)
+```
+lbr inspect-dump --dump "$DUMP"
+```
+It prints `header (versions only)` and, when the client cannot read the archive, `It needs a PostgreSQL N (or newer) server container: postgres:N, named c95-pgN, 127.0.0.1:56433 only.`
+
+### 2b. Create ONE extra throw-away server (needs the owner's consent; it is named c95-*, loopback only)
+```
+PGMAJ=17                                     # use the N the previous step printed
+used_ports | grep -x 56433                    # expect NO output (port free)
+docker ps -a --filter "name=^c95-pg${PGMAJ}\$" --format '{{.Names}}'    # expect NO output (name free)
+docker run -d --name "c95-pg${PGMAJ}" -e POSTGRES_PASSWORD="$PG_PW" -p 127.0.0.1:56433:5432 "postgres:${PGMAJ}"
+until docker exec "c95-pg${PGMAJ}" pg_isready -U postgres >/dev/null 2>&1; do sleep 1; done; echo ready
+export PG17_NAME="c95-pg${PGMAJ}"
+v6_docker_ready "$PG17_NAME" 56433          # expect: OK  c95-pgN postgres:N 127.0.0.1:56433->5432/tcp Up
+```
+Your 12 older containers, `c95-pg16` and every image not named `c95-*` are never touched. Remove this container when you are done with
+`docker rm -f -v "$PG17_NAME"` (the image stays; remove it only if you want to).
+`lbr17`, `pick17` (in `env_v6.sh`) talk to that server only: `127.0.0.1:56433`, client `docker exec` into `$PG17_NAME`, state in `$TMPD/rehearsal17`.
+
 ```
 DUMP="$GH_LB/prod-pre-alembic-adoption.dump"
 lbr inspect-dump --dump "$DUMP"                      # expected: kind: custom (or plain), exit 0. exit 3 = STOP, paste the output
