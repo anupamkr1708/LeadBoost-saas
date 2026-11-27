@@ -7,6 +7,7 @@ revision at a time, so the harness cannot silently disagree with alembic/version
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import subprocess
 import sys
@@ -310,3 +311,100 @@ def test_restore_refuses_before_creating_anything_when_the_client_cannot_read_th
     )
     assert p.returncode == 3 and "postgres:17" in p.stdout and "c95-pg17" in p.stdout and "1.16.0" in p.stdout
     assert "my_secret_database_name" not in p.stdout + p.stderr
+
+
+def test_a_baseline_table_set_missing_baseline_columns_is_older_than_the_baseline():
+    t, c = _tables_cols(0)
+    c["ai_decision_logs"].discard("source")  # created by the baseline revision itself
+    r = rr.classify_revisions(t, c)
+    assert r["verdict"] == "older-than-baseline" and r["at_revision"] is None
+    assert r["revisions"][0]["status"] == "partial"
+    r = rr.classify_revisions(t, c, {"leads": set()})
+    assert any("uq_leads_org_website" in m for m in r["revisions"][0]["missing"])
+
+
+def test_child_targets_are_sqlite_or_a_rehearsal_database_only():
+    rr.assert_child_target("sqlite:////tmp/x.db")
+    rr.assert_child_target("postgresql://postgres:pw@127.0.0.1:56433/c95_rehearsal_lb_x")
+    for bad in (
+        "postgresql://postgres:pw@127.0.0.1:56433/leadboost",
+        "postgresql://postgres:pw@db.example.com:5432/c95_rehearsal_lb_x",
+        "postgresql://postgres:pw@127.0.0.1:5432/c95_rehearsal_lb_x",
+    ):
+        with pytest.raises(rr.Refused):
+            rr.assert_child_target(bad)
+
+
+def _schema_diff(db_file: Path) -> str:
+    env = {
+        "PATH": os.environ.get("PATH", ""),
+        "DATABASE_URL": f"sqlite:///{db_file}",
+        "SECRET_KEY": "k" * 40,
+        "ENVIRONMENT": "development",
+        "PYTHONDONTWRITEBYTECODE": "1",
+    }
+    p = subprocess.run(
+        [sys.executable, str(SCRIPT), "child-schema-diff"],
+        cwd=BACKEND,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=180,
+        check=False,
+    )
+    assert p.returncode == 0, p.stderr[-800:]
+    return p.stdout
+
+
+def test_schema_diff_lists_what_is_missing_at_the_baseline_and_nothing_structural_at_head(tmp_path):
+    db_file = tmp_path / "diff.db"
+    _upgrade(db_file, rr.BASELINE)
+    out = _schema_diff(db_file)
+    for expected in (
+        "add_table        email_accounts",
+        "add_table        outreach_actions",
+        "add_table        organization_outreach_policies",
+        "add_column       organizations.industry",
+        "add_column       users.signature",
+    ):
+        assert expected in out, (expected, out[:600])
+    _upgrade(db_file, "head")
+    out = _schema_diff(db_file)
+    assert not [
+        ln
+        for ln in out.splitlines()
+        if ln.startswith(("DIFF add_table", "DIFF add_column", "DIFF add_constraint"))
+    ], out[:800]
+    assert out.strip().splitlines()[-1].startswith("SUMMARY")
+
+
+def test_apply_sql_only_touches_databases_this_harness_created_and_only_repo_sql(tmp_path):
+    state = tmp_path / "state"
+    state.mkdir()
+    env = {
+        "PATH": os.environ.get("PATH", ""),
+        "REHEARSAL_ADMIN_URL": "postgresql://postgres:pw@127.0.0.1:56432/postgres",
+        "REHEARSAL_STATE_DIR": str(state),
+    }
+    name = "c95_rehearsal_lb_mine_20261127t000000z"
+
+    def run(db: str, sql: str):
+        return subprocess.run(
+            [sys.executable, str(SCRIPT), "apply-sql", "--db", db, "--file", sql],
+            cwd=BACKEND,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+
+    p = run(name, "migrations/001_p0_durable_execution.sql")
+    assert p.returncode == 2 and "was not created by this harness" in p.stderr
+    (state / "rehearsal_lb_state.json").write_text(json.dumps({"databases": [name]}))
+    outside = tmp_path / "evil.sql"
+    outside.write_text("DROP DATABASE postgres;")
+    p = run(name, str(outside))
+    assert p.returncode == 2 and "inside the repository's backend/" in p.stderr
+    p = run("postgres", "migrations/001_p0_durable_execution.sql")
+    assert p.returncode == 2 and "does not match" in p.stderr

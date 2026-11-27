@@ -28,6 +28,8 @@ databases named c95_rehearsal_*)::
     restore --dump FILE --label L     new database c95_rehearsal_lb_<L>_<UTC>; prints its name and row counts
     probe --db NAME                   which Alembic revisions' objects exist (read-only) + verify_baseline_schema result
     counts --db NAME                  row counts only (read-only)
+    schema-diff --db NAME             exact differences between the copy and the HEAD models (read-only; names/types/counts)
+    apply-sql --db NAME --file F      apply one .sql file from backend/ to a COPY this harness created (never anything else)
     adopt --db NAME [--stamp baseline|head] [--continue-after-verify-failure] [--full-downgrade-chain]
     wrong-order --source NAME         the realistic failure: app started (create_all) before Alembic, on two copies
     app-start --db NAME               start the real app on a free port, hit /live /ready /health, compare tables+counts
@@ -101,7 +103,22 @@ BASELINE_TABLES = [
     "scraping_logs",
 ]
 REVISION_SPEC: list[dict] = [
-    {"rev": BASELINE, "what": "baseline: 18 tables", "tables": BASELINE_TABLES, "columns": {}},
+    {
+        "rev": BASELINE,
+        "what": "baseline: 18 tables, their P0 columns, uq_leads_org_website",
+        "tables": BASELINE_TABLES,
+        # Columns/constraint the baseline revision creates inside its tables that a pre-P0 database lacks
+        # (the same ones scripts/verify_baseline_schema.py names).
+        "columns": {
+            "scraping_logs": ["organization_id", "pipeline_id"],
+            "lead_enrichment_logs": ["organization_id", "pipeline_id", "success"],
+            "ai_decision_logs": ["evaluation_version", "pipeline_id", "source"],
+            "pipeline_execution_logs": ["error_message"],
+            "evaluation_report_logs": ["evaluation_version"],
+            "prompt_execution_logs": ["model"],
+        },
+        "constraints": {"leads": ["uq_leads_org_website"]},
+    },
     {
         "rev": "61258798a87a",
         "what": "P1.2: organization_qualification_settings + 4 columns",
@@ -257,6 +274,8 @@ def classify_revisions(
         verdict = "clean-at-revision"
     elif st[0] == "absent":
         verdict, at = "not-a-leadboost-schema", None
+    elif st[0] == "partial":
+        verdict, at = "older-than-baseline", None
     else:
         verdict, at = "mixed", None
     return {"verdict": verdict, "at_revision": at, "revisions": rows}
@@ -741,6 +760,16 @@ def cmd_probe(admin, db: str) -> int:
     )
     for p in problems:
         T.say(f"    - {p}")
+    if res["verdict"] == "older-than-baseline":
+        T.say(
+            "  OLDER THAN THE BASELINE: the 18 baseline tables exist but some columns/constraints the baseline revision itself creates are missing,"
+        )
+        T.say(
+            "  so neither `stamp baseline` nor `stamp head` describes this database. Run `schema-diff` for the exact list. The repo's historical"
+        )
+        T.say(
+            "  backend/migrations/001_p0_durable_execution.sql adds the missing P0 COLUMNS (idempotent, additive); it does NOT add uq_leads_org_website."
+        )
     T.say(
         "  Reading guide: verify compares against HEAD models. exit 0 = the schema already equals head (the repo's test then stamps HEAD);"
     )
@@ -751,6 +780,142 @@ def cmd_probe(admin, db: str) -> int:
         "  which verify (comparing to head) rejects. This probe tells you which of those you actually have; it changes nothing."
     )
     return EXIT_OK
+
+
+def assert_child_target(url: str) -> None:
+    """The read-only schema-diff child may open SQLite (tests) or a c95_rehearsal_* database on an allowed server only."""
+    if url.startswith("sqlite"):
+        return
+    parts = urlsplit(url.replace("postgresql+psycopg2://", "postgresql://", 1))
+    assert_rehearsal_server(parts.hostname, parts.port)
+    assert_rehearsal_db_name((parts.path or "/").lstrip("/"))
+
+
+def _flatten(diffs) -> list:
+    out = []
+    for d in diffs:
+        if isinstance(d, list):
+            out.extend(_flatten(d))
+        else:
+            out.append(d)
+    return out
+
+
+def describe_diff(d) -> tuple[str, str]:
+    """(kind, one-line description) for an Alembic compare_metadata operation. Names and types only."""
+    kind = d[0]
+    if kind in ("add_table", "remove_table"):
+        t = d[1]
+        return kind, f"{t.name} ({len(t.columns)} columns)"
+    if kind in ("add_column", "remove_column"):
+        col = d[3]
+        null = "NULL" if col.nullable else "NOT NULL"
+        dflt = "server default" if col.server_default is not None else "no server default"
+        return kind, f"{d[2]}.{col.name} {col.type} {null}, {dflt}"
+    if kind in ("modify_nullable", "modify_type", "modify_default"):
+        return kind, f"{d[2]}.{d[3]}: database {d[5]!s} -> models {d[6]!s}"
+    if kind in ("add_constraint", "remove_constraint"):
+        c = d[1]
+        cols = ", ".join(getattr(col, "name", str(col)) for col in getattr(c, "columns", []))
+        table = getattr(getattr(c, "table", None), "name", "?")
+        return kind, f"{type(c).__name__} {c.name or '(unnamed)'} on {table} ({cols})"
+    if kind in ("add_index", "remove_index"):
+        i = d[1]
+        return (
+            kind,
+            f"{i.name} on {i.table.name} ({', '.join(c.name for c in i.columns)}){' UNIQUE' if i.unique else ''}",
+        )
+    if kind in ("add_fk", "remove_fk"):
+        f = d[1]
+        return kind, f"{f.name or '(unnamed)'} on {f.table.name} -> {f.referred_table.name}"
+    return kind, str(d[1:])[:160]
+
+
+def child_schema_diff() -> int:
+    """Child: compare the live database (read-only) with the HEAD models. Prints names, types and counts only."""
+    url = os.environ.get("DATABASE_URL", "")
+    assert_child_target(url)
+    sys.path.insert(0, str(BACKEND))
+    from alembic.autogenerate import compare_metadata
+    from alembic.migration import MigrationContext
+    from sqlalchemy import create_engine, text
+
+    import application.observability.models  # noqa: F401
+    import core.infrastructure.database as db
+
+    eng = create_engine(url)
+    kinds: dict[str, int] = {}
+    with eng.connect() as conn:
+        if conn.dialect.name == "postgresql":
+            conn.execute(text("SET TRANSACTION READ ONLY"))
+        ctx = MigrationContext.configure(conn, opts={"compare_type": True, "compare_server_default": False})
+        flat = _flatten(compare_metadata(ctx, db.Base.metadata))
+        for d in sorted(flat, key=lambda x: (x[0], describe_diff(x)[1])):
+            kind, desc = describe_diff(d)
+            if kind == "remove_table" and desc.startswith("alembic_version"):
+                continue
+            kinds[kind] = kinds.get(kind, 0) + 1
+            print(f"DIFF {kind:16s} {desc}")
+            if kind == "add_constraint" and type(d[1]).__name__ == "UniqueConstraint":
+                c = d[1]
+                names = [col.name for col in c.columns]
+                tname = c.table.name
+                if conn.dialect.name == "postgresql" and tname in set(
+                    r[0]
+                    for r in conn.execute(
+                        text("SELECT tablename FROM pg_tables WHERE schemaname='public'")
+                    ).fetchall()
+                ):
+                    quoted = ", ".join(f'"{n}"' for n in names)
+                    notnull = " AND ".join(f'"{n}" IS NOT NULL' for n in names)
+                    n = conn.execute(
+                        text(
+                            f'SELECT count(*) FROM (SELECT 1 FROM "{tname}" WHERE {notnull} GROUP BY {quoted} HAVING count(*) > 1) x'
+                        )
+                    ).scalar()
+                    print(f"DUP  {c.name}: groups of rows that would violate it (counts only): {n}")
+    print("SUMMARY " + json.dumps(kinds, sort_keys=True))
+    return 0
+
+
+def cmd_schema_diff(admin, db: str) -> int:
+    T.step(f"schema-diff {db}  (read-only: live database vs HEAD models; names, types and counts only)")
+    rc, out, dt = sh(
+        [python_exe(), str(Path(__file__).resolve()), "child-schema-diff"], child_env(admin, db), timeout=300
+    )
+    lines = [ln for ln in out.splitlines() if ln.startswith(("DIFF ", "DUP ", "SUMMARY "))]
+    if rc != 0 or not lines:
+        raise EnvProblem(f"schema-diff failed (rc={rc}): {err_line(out)}")
+    for ln in lines:
+        T.say("  " + ln)
+    T.say(
+        f"  ({dt:.1f}s) This is a comparison, not a plan: it lists what differs. add_* = missing from the database; remove_* = extra in the database."
+    )
+    T.say(
+        "  A NOT NULL column without a server default cannot simply be added to a table that has rows; each such line needs a decision."
+    )
+    return EXIT_OK
+
+
+def cmd_apply_sql(admin, db: str, sql_file: Path) -> int:
+    """Apply one of the repository's own SQL files to a rehearsal COPY (never to anything else)."""
+    T.step(f"apply-sql {sql_file.name} to the rehearsal copy {db}")
+    assert_rehearsal_db_name(db)
+    if db not in load_state()["databases"]:
+        raise Refused(f"refusing: {db} was not created by this harness (not in its state file).")
+    f = sql_file.resolve()
+    if BACKEND.resolve() not in f.parents or f.suffix != ".sql" or not f.is_file():
+        raise Refused(
+            "refusing: only an existing .sql file inside the repository's backend/ directory may be applied."
+        )
+    cmd, env = pg_client_cmd(admin, "psql", db, ["-X", "-q", "-v", "ON_ERROR_STOP=1", "-f", "-"])
+    rc, out, dt = sh(cmd, env, stdin_path=f, timeout=600)
+    shown = [ln.strip()[:200] for ln in out.splitlines() if ln.strip()][:12]
+    T.expect(f"psql applied {f.name} (rc={rc}, {dt:.1f}s)", rc == 0, "" if rc == 0 else err_line(out))
+    for ln in shown:
+        T.say("    " + ln)
+    T.say("  Next: `probe` and `schema-diff` on the same copy show what is still different.")
+    return EXIT_OK if T.ok else EXIT_FAIL
 
 
 def cmd_counts(admin, db: str) -> int:
@@ -1071,12 +1236,20 @@ def main(argv=None) -> int:
     p.add_argument("--stamp", choices=["baseline", "head"], default="baseline")
     p.add_argument("--continue-after-verify-failure", action="store_true")
     p.add_argument("--full-downgrade-chain", action="store_true")
+    p = sub.add_parser("schema-diff")
+    p.add_argument("--db", required=True)
+    p = sub.add_parser("apply-sql")
+    p.add_argument("--db", required=True)
+    p.add_argument("--file", required=True)
+    sub.add_parser("child-schema-diff")
     p = sub.add_parser("wrong-order")
     p.add_argument("--source", required=True)
     sub.add_parser("status")
     sub.add_parser("cleanup")
     a = ap.parse_args(argv)
     try:
+        if a.cmd == "child-schema-diff":
+            return child_schema_diff()
         admin = parse_admin_url(os.environ.get("REHEARSAL_ADMIN_URL", ""))
         refuse_if_dotenv()
         sd = state_path().parent
@@ -1085,7 +1258,7 @@ def main(argv=None) -> int:
             return EXIT_OK
         if a.cmd == "cleanup":
             return cmd_cleanup(admin)
-        if a.cmd in ("probe", "counts", "app-start", "adopt"):
+        if a.cmd in ("probe", "counts", "app-start", "adopt", "schema-diff", "apply-sql"):
             assert_rehearsal_db_name(a.db)
         if a.cmd == "inspect-dump":
             return cmd_inspect_dump(admin, Path(a.dump))
@@ -1093,6 +1266,10 @@ def main(argv=None) -> int:
             return cmd_restore(admin, Path(a.dump), a.label)
         if a.cmd == "probe":
             return cmd_probe(admin, a.db)
+        if a.cmd == "schema-diff":
+            return cmd_schema_diff(admin, a.db)
+        if a.cmd == "apply-sql":
+            return cmd_apply_sql(admin, a.db, Path(a.file))
         if a.cmd == "counts":
             return cmd_counts(admin, a.db)
         if a.cmd == "app-start":
