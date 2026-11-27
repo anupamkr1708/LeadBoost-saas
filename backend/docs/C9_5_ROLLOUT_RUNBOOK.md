@@ -127,6 +127,7 @@ decides:
 | `at-head` | 0 | schema already equals head | `stamp head` (what the verifier and the repo test do); **not** `stamp eaa40e596fcc` |
 | `clean-at-revision <R>` where R is the baseline | 1 | exactly the baseline | the documented rule says stop. The correct operation is `stamp eaa40e596fcc` then `upgrade head`, but the documented gate refuses it. **Needs your decision and a reviewed change to the documentation/gate; the rehearsal can only show you what it would do on a copy** (`adopt --continue-after-verify-failure`). |
 | `clean-at-revision <R>` for another R | 1 | exactly revision R | same, with `stamp R` |
+| `older-than-baseline` | 1 | the 18 baseline tables exist but columns/constraints the baseline revision itself creates are missing (a pre-P0 or `create_all`-built database). `[REHEARSED on the owner's dump copy]` this is the shape of `prod-pre-alembic-adoption.dump`: 11 P0 columns and `uq_leads_org_website` missing, the P1.2 table present but not its 4 columns | neither stamp describes it. `schema-diff` lists the exact differences (including foreign keys and indexes the verifier does not check) and runs a duplicate pre-check for the missing unique constraint. The repository's own `backend/migrations/001_p0_durable_execution.sql` (additive, idempotent, transactional) adds the 11 columns and indexes but **not** the unique constraint or the foreign keys; a P1.2 table created by `create_all` makes `alembic upgrade` fail at that revision (`DuplicateTable`) even in the correct order. **Needs a reviewed reconciliation, rehearsed on copies, then a fresh probe (verify exit 0, then `stamp head`).** |
 | `mixed` | 1 | e.g. `create_all` ran after an older schema | no stamp is safe. Restore from the pre-migration backup and decide on a reviewed, hand-written reconciliation. Do not edit the live database. |
 
 Until D4 is decided, **do not run `alembic stamp` against production.**
@@ -161,6 +162,8 @@ is a Railway worker; the runbook "worker deployed through the Render Blueprint" 
 3. Back up `MAILBOX_ENCRYPTION_KEY` offline, separately.
 
 ### 6.2 Rehearsals on your machine (never against production)
+**The dump you rehearse on is a snapshot** (the owner's file is dated 7 September): the schema of the live database may have changed since. Take a **fresh** dump immediately before the window and re-run `inspect-dump`, `restore` and `probe` on it; decisions made on the old dump are only valid if the probe verdict is unchanged.
+
 Prerequisite: the throw-away container `c95-pg16` (PostgreSQL 16, `127.0.0.1:56432`). All commands refuse anything else. If the dump was made by a newer PostgreSQL
 (`pg_restore: unsupported version (1.16)` = PostgreSQL 17 or newer), the LeadBoost harness also accepts one extra owner-created container, `c95-pg17` on `127.0.0.1:56433`
 (`ROLLOUT_REHEARSAL_RESULTS.md` sections 2a-2b). **Production's PostgreSQL major version follows from that header and should be written into the evidence record.**

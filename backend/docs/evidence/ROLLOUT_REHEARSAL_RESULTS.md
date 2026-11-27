@@ -116,6 +116,18 @@ lbr app-start --db "$D2"     # or $D3, whichever reached head
 | `/live` / `/ready` / `/health` | |
 | Tables created / count changes (expect none) | |
 
+## 5b. When the probe says `older-than-baseline` or `mixed`: what exactly differs, and the repository's own SQL on a copy
+Use `lbr17`/`pick17` if you used the extra server, otherwise `lbr`/`pick`. Everything here runs on copies; nothing is applied to anything else.
+```
+lbr17 restore --dump "$DUMP" --label recon | grep RESTORED; R1=$(pick17 recon)
+lbr17 schema-diff --db "$R1" 2>&1 | tee "$LOGS/v6a_lb17_schema_diff_before.log"                 # read-only
+lbr17 apply-sql --db "$R1" --file "$LB_V6/backend/migrations/001_p0_durable_execution.sql" 2>&1 | tee "$LOGS/v6a_lb17_apply_p0_sql.log"
+lbr17 probe --db "$R1" 2>&1 | tee "$LOGS/v6a_lb17_probe_after_p0_sql.log"
+lbr17 schema-diff --db "$R1" 2>&1 | tee "$LOGS/v6a_lb17_schema_diff_after.log"
+```
+`apply-sql` accepts only an existing `.sql` file inside the repository's `backend/` directory and only a database this harness created. The file is the repository's historical, additive, idempotent P0 migration; whether it is the right step for production is **your decision (runbook D4)**; this only shows what it would do to a copy.
+`schema-diff` prints names, types and counts only, plus a duplicate pre-check (counts only) for any missing unique constraint.
+
 ## 6. Cleanup (drops only what the harnesses recorded)
 ```
 lbr cleanup; mar cleanup
