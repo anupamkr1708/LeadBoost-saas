@@ -408,3 +408,50 @@ def test_apply_sql_only_touches_databases_this_harness_created_and_only_repo_sql
     assert p.returncode == 2 and "inside the repository's backend/" in p.stderr
     p = run("postgres", "migrations/001_p0_durable_execution.sql")
     assert p.returncode == 2 and "does not match" in p.stderr
+
+
+def _fake_docker(tmp_path, monkeypatch, published: str, rc: int = 0):
+    """A `docker` on PATH that only answers `docker port <container> 5432/tcp`."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    script = bin_dir / "docker"
+    script.write_text(
+        f'#!/bin/sh\nif [ "$1" = port ]; then printf \'%s\\n\' "{published}"; exit {rc}; fi\nexit 9\n'
+    )
+    script.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ.get('PATH', '')}")
+    rr._CONTAINER_VERIFIED.clear()
+
+
+@pytest.mark.parametrize(
+    "admin_port,published,rc,accepted",
+    [
+        (56432, "127.0.0.1:56432", 0, True),
+        (56433, "127.0.0.1:56433", 0, True),
+        (56432, "127.0.0.1:56433", 0, False),  # the OTHER throw-away server
+        (56433, "127.0.0.1:56432", 0, False),
+        (56432, "", 0, False),
+        (56432, "0.0.0.0:56432", 0, False),
+        (56432, "127.0.0.1:56432", 1, False),
+    ],
+)
+def test_docker_client_container_must_serve_the_validated_endpoint(
+    tmp_path, monkeypatch, admin_port, published, rc, accepted
+):
+    _fake_docker(tmp_path, monkeypatch, published, rc)
+    monkeypatch.setenv("REHEARSAL_PG_CLIENT", "docker:c95-pg17")
+    admin = rr.parse_admin_url(f"postgresql://postgres:pw@127.0.0.1:{admin_port}/postgres")
+    if accepted:
+        cmd, _env = rr.pg_client_cmd(admin, "pg_dump", "c95_rehearsal_lb_x", ["-Fc"])
+        assert cmd[:7] == ["docker", "exec", "-i", "-e", "PGPASSWORD", "c95-pg17", "pg_dump"]
+    else:
+        with pytest.raises(rr.Refused, match="must be the guarded server|cannot ask docker"):
+            rr.pg_client_cmd(admin, "pg_dump", "c95_rehearsal_lb_x", ["-Fc"])
+
+
+def test_docker_client_with_a_non_c95_name_is_refused_before_docker_is_asked(tmp_path, monkeypatch):
+    _fake_docker(tmp_path, monkeypatch, "127.0.0.1:56432")
+    monkeypatch.setenv("REHEARSAL_PG_CLIENT", "docker:my-production-db")
+    admin = rr.parse_admin_url("postgresql://postgres:pw@127.0.0.1:56432/postgres")
+    with pytest.raises(rr.Refused, match="named c95-"):
+        rr.pg_client_cmd(admin, "pg_dump", "c95_rehearsal_lb_x", [])
